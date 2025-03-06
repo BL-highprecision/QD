@@ -39,6 +39,7 @@ using std::setw;
 
 /* This routine is called whenever a fatal error occurs. */
 void dd_real::error(const char *msg) { 
+  if (suppress_error_messages) return;
   if (msg) { cerr << "ERROR " << msg << endl; }
 }
 
@@ -1304,3 +1305,6 @@ dd_real dd_real::debug_rand() {
   }
   return a;
 }
+
+
+bool suppress_error_messages = false;

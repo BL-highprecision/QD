@@ -40,6 +40,7 @@ using std::setw;
 using namespace qd;
 
 void qd_real::error(const char *msg) {
+  if (suppress_error_messages) return;
   if (msg) { cerr << "ERROR " << msg << endl; }
 }
 

@@ -1,5 +1,8 @@
 # QD
-A double-double and quad-double package for Fortran and C++
+A double-double and quad-double package for Fortran and C++.
+
+# Cite this paper
+Y. Hida, X. S. Li and D. H. Bailey, "Algorithms for quad-double precision floating point arithmetic," Proceedings 15th IEEE Symposium on Computer Arithmetic. ARITH-15 2001, Vail, CO, USA, 2001, pp. 155-162, doi: 10.1109/ARITH.2001.930115.
 
 ## End-user documentation
 

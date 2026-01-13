@@ -534,7 +534,7 @@ string qd_real::to_string(int precision, int width, ios_base::fmtflags fmt,
         	from_string = atof(s.c_str());
         	// if this ratio is large, then the string has not been fixed
         	if( fabs( from_string / this->x[0] ) > 3.0 ){
-        		dd_real::error("Re-rounding unsuccessful in large number fixed point trap.") ;
+        		qd_real::error("Re-rounding unsuccessful in large number fixed point trap.") ;
         	}
     	}
     }

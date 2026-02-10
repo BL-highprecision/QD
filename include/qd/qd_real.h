@@ -290,5 +290,7 @@ QD_API std::istream &operator>>(std::istream &s, qd_real &a);
 #include <qd/qd_inline.h>
 #endif
 
+QD_API extern bool qd_suppress_error_messages; /** Set to true to suppress error messages. Initialized in qd_real.cpp */
+
 #endif /* _QD_QD_REAL_H */
 

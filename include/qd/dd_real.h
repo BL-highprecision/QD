@@ -288,7 +288,7 @@ QD_API std::istream& operator>>(std::istream &s, dd_real &a);
 
 
 
-QD_API extern bool suppress_error_messages; /** Set to true to suppress error messages. Initialized in dd_real.cpp */
+QD_API extern bool dd_suppress_error_messages; /** Set to true to suppress error messages. Initialized in dd_real.cpp */
 
 #endif /* _QD_DD_REAL_H */
 

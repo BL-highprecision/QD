@@ -37,6 +37,16 @@ using std::ios_base;
 using std::string;
 using std::setw;
 
+namespace {
+
+inline dd_real sqrt_karp(const dd_real &a) {
+  double x = 1.0 / std::sqrt(a.x[0]);
+  double ax = a.x[0] * x;
+  return dd_real::add(ax, (a - dd_real::sqr(ax)).x[0] * (x * 0.5));
+}
+
+} // namespace
+
 /* This routine is called whenever a fatal error occurs. */
 void dd_real::error(const char *msg) { 
   if (dd_suppress_error_messages) return;
@@ -64,9 +74,13 @@ QD_API dd_real sqrt(const dd_real &a) {
     return dd_real::_nan;
   }
 
-  double x = 1.0 / std::sqrt(a.x[0]);
-  double ax = a.x[0] * x;
-  return dd_real::add(ax, (a - dd_real::sqr(ax)).x[0] * (x * 0.5));
+  /* Avoid overflow in the Karp refinement for extremely large inputs by
+     using the exact identity sqrt(a) = 2 * sqrt(a / 4). */
+  if (a.x[0] > 0x1p+969) {
+    return mul_pwr2(sqrt_karp(mul_pwr2(a, 0.25)), 2.0);
+  }
+
+  return sqrt_karp(a);
 }
 
 /* Computes the square root of a double in double-double precision. 

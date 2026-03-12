@@ -39,6 +39,17 @@ using std::setw;
 
 using namespace qd;
 
+namespace {
+
+/* Rescale very large numerators by 2^-53 before quotient reconstruction
+   so intermediate products such as q0 * b and qk * b do not overflow in
+   double.  The 2^969 threshold leaves enough headroom for reconstruction. */
+inline bool qd_real_div_needs_rescale(double a_hi) {
+  return std::fabs(a_hi) > 0x1p+969;
+}
+
+} // namespace
+
 void qd_real::error(const char *msg) {
   if (qd_suppress_error_messages) return;
   if (msg) { cerr << "ERROR " << msg << endl; }
@@ -139,16 +150,22 @@ qd_real ceil(const qd_real &a) {
 qd_real operator/(const qd_real &a, double b) {
   /* Strategy:  compute approximate quotient using high order
      doubles, and then correct it 3 times using the remainder.
-     (Analogous to long division.)                             */
+     (Analogous to long division.)
+
+     Rescale extremely large numerators by an exact power of two so the
+     quotient reconstruction qk * b does not overflow in double. */
   double t0, t1;
   double q0, q1, q2, q3;
   qd_real r;
 
-  q0 = a[0] / b;  /* approximate quotient */
+  const bool rescale = qd_real_div_needs_rescale(a[0]);
+  const qd_real aa = rescale ? mul_pwr2(a, 0x1p-53) : a;
+
+  q0 = aa[0] / b;  /* approximate quotient */
 
   /* Compute the remainder  a - q0 * b */
   t0 = two_prod(q0, b, t1);
-  r = a - dd_real(t0, t1);
+  r = aa - dd_real(t0, t1);
 
   /* Compute the first correction */
   q1 = r[0] / b;
@@ -164,7 +181,8 @@ qd_real operator/(const qd_real &a, double b) {
   q3 = r[0] / b;
 
   renorm(q0, q1, q2, q3);
-  return qd_real(q0, q1, q2, q3);
+  qd_real result(q0, q1, q2, q3);
+  return rescale ? mul_pwr2(result, 0x1p+53) : result;
 }
 
 qd_real::qd_real(const char *s) {
@@ -652,8 +670,11 @@ qd_real qd_real::sloppy_div(const qd_real &a, const dd_real &b) {
   qd_real r;
   qd_real qd_b(b);
 
-  q0 = a[0] / b._hi();
-  r = a - q0 * qd_b;
+  const bool rescale = qd_real_div_needs_rescale(a[0]);
+  const qd_real aa = rescale ? mul_pwr2(a, 0x1p-53) : a;
+
+  q0 = aa[0] / b._hi();
+  r = aa - q0 * qd_b;
 
   q1 = r[0] / b._hi();
   r -= (q1 * qd_b);
@@ -664,7 +685,8 @@ qd_real qd_real::sloppy_div(const qd_real &a, const dd_real &b) {
   q3 = r[0] / b._hi();
 
   ::renorm(q0, q1, q2, q3);
-  return qd_real(q0, q1, q2, q3);
+  qd_real result(q0, q1, q2, q3);
+  return rescale ? mul_pwr2(result, 0x1p+53) : result;
 }
 
 qd_real qd_real::accurate_div(const qd_real &a, const dd_real &b) {
@@ -672,8 +694,11 @@ qd_real qd_real::accurate_div(const qd_real &a, const dd_real &b) {
   qd_real r;
   qd_real qd_b(b);
 
-  q0 = a[0] / b._hi();
-  r = a - q0 * qd_b;
+  const bool rescale = qd_real_div_needs_rescale(a[0]);
+  const qd_real aa = rescale ? mul_pwr2(a, 0x1p-53) : a;
+
+  q0 = aa[0] / b._hi();
+  r = aa - q0 * qd_b;
 
   q1 = r[0] / b._hi();
   r -= (q1 * qd_b);
@@ -687,7 +712,8 @@ qd_real qd_real::accurate_div(const qd_real &a, const dd_real &b) {
   q4 = r[0] / b._hi();
 
   ::renorm(q0, q1, q2, q3, q4);
-  return qd_real(q0, q1, q2, q3);
+  qd_real result(q0, q1, q2, q3);
+  return rescale ? mul_pwr2(result, 0x1p+53) : result;
 }
 
 /* quad-double / quad-double */
@@ -696,8 +722,11 @@ qd_real qd_real::sloppy_div(const qd_real &a, const qd_real &b) {
 
   qd_real r;
 
-  q0 = a[0] / b[0];
-  r = a - (b * q0);
+  const bool rescale = qd_real_div_needs_rescale(a[0]);
+  const qd_real aa = rescale ? mul_pwr2(a, 0x1p-53) : a;
+
+  q0 = aa[0] / b[0];
+  r = aa - (b * q0);
 
   q1 = r[0] / b[0];
   r -= (b * q1);
@@ -709,7 +738,8 @@ qd_real qd_real::sloppy_div(const qd_real &a, const qd_real &b) {
 
   ::renorm(q0, q1, q2, q3);
 
-  return qd_real(q0, q1, q2, q3);
+  qd_real result(q0, q1, q2, q3);
+  return rescale ? mul_pwr2(result, 0x1p+53) : result;
 }
 
 qd_real qd_real::accurate_div(const qd_real &a, const qd_real &b) {
@@ -717,8 +747,11 @@ qd_real qd_real::accurate_div(const qd_real &a, const qd_real &b) {
 
   qd_real r;
 
-  q0 = a[0] / b[0];
-  r = a - (b * q0);
+  const bool rescale = qd_real_div_needs_rescale(a[0]);
+  const qd_real aa = rescale ? mul_pwr2(a, 0x1p-53) : a;
+
+  q0 = aa[0] / b[0];
+  r = aa - (b * q0);
 
   q1 = r[0] / b[0];
   r -= (b * q1);
@@ -733,7 +766,8 @@ qd_real qd_real::accurate_div(const qd_real &a, const qd_real &b) {
 
   ::renorm(q0, q1, q2, q3, q4);
 
-  return qd_real(q0, q1, q2, q3);
+  qd_real result(q0, q1, q2, q3);
+  return rescale ? mul_pwr2(result, 0x1p+53) : result;
 }
 
 QD_API qd_real fsqrt(const qd_real &a, int &flag) {

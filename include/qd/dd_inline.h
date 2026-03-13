@@ -256,16 +256,26 @@ inline dd_real &dd_real::operator*=(const dd_real &a) {
 }
 
 /*********** Divisions ************/
+/* Rescale very large numerators by 2^-53 before quotient reconstruction
+   so intermediate products such as q1 * b do not overflow in double.
+   The 2^969 threshold leaves enough headroom for the reconstruction. */
+static inline bool dd_real_div_needs_rescale(double a_hi) {
+  return std::fabs(a_hi) > 0x1p+969;
+}
+
 inline dd_real dd_real::div(double a, double b) {
   double q1, q2;
   double p1, p2;
   double s, e;
 
-  q1 = a / b;
+  const bool rescale = dd_real_div_needs_rescale(a);
+  const double aa = rescale ? std::ldexp(a, -53) : a;
+
+  q1 = aa / b;
 
   /* Compute  a - q1 * b */
   p1 = qd::two_prod(q1, b, p2);
-  s = qd::two_diff(a, p1, e);
+  s = qd::two_diff(aa, p1, e);
   e -= p2;
 
   /* get next approximation */
@@ -273,7 +283,8 @@ inline dd_real dd_real::div(double a, double b) {
 
   s = qd::quick_two_sum(q1, q2, e);
 
-  return dd_real(s, e);
+  dd_real r(s, e);
+  return rescale ? mul_pwr2(r, 0x1p+53) : r;
 }
 
 /* double-double / double */
@@ -283,13 +294,16 @@ inline dd_real operator/(const dd_real &a, double b) {
   double p1, p2;
   double s, e;
   dd_real r;
-  
-  q1 = a.x[0] / b;   /* approximate quotient. */
+
+  const bool rescale = dd_real_div_needs_rescale(a.x[0]);
+  const dd_real aa = rescale ? mul_pwr2(a, 0x1p-53) : a;
+
+  q1 = aa.x[0] / b;   /* approximate quotient. */
 
   /* Compute  this - q1 * d */
   p1 = qd::two_prod(q1, b, p2);
-  s = qd::two_diff(a.x[0], p1, e);
-  e += a.x[1];
+  s = qd::two_diff(aa.x[0], p1, e);
+  e += aa.x[1];
   e -= p2;
   
   /* get next approximation. */
@@ -298,7 +312,7 @@ inline dd_real operator/(const dd_real &a, double b) {
   /* renormalize */
   r.x[0] = qd::quick_two_sum(q1, q2, r.x[1]);
 
-  return r;
+  return rescale ? mul_pwr2(r, 0x1p+53) : r;
 }
 
 inline dd_real dd_real::sloppy_div(const dd_real &a, const dd_real &b) {
@@ -306,29 +320,35 @@ inline dd_real dd_real::sloppy_div(const dd_real &a, const dd_real &b) {
   double q1, q2;
   dd_real r;
 
-  q1 = a.x[0] / b.x[0];  /* approximate quotient */
+  const bool rescale = dd_real_div_needs_rescale(a.x[0]);
+  const dd_real aa = rescale ? mul_pwr2(a, 0x1p-53) : a;
+
+  q1 = aa.x[0] / b.x[0];  /* approximate quotient */
 
   /* compute  this - q1 * dd */
   r = b * q1;
-  s1 = qd::two_diff(a.x[0], r.x[0], s2);
+  s1 = qd::two_diff(aa.x[0], r.x[0], s2);
   s2 -= r.x[1];
-  s2 += a.x[1];
+  s2 += aa.x[1];
 
   /* get next approximation */
   q2 = (s1 + s2) / b.x[0];
 
   /* renormalize */
   r.x[0] = qd::quick_two_sum(q1, q2, r.x[1]);
-  return r;
+  return rescale ? mul_pwr2(r, 0x1p+53) : r;
 }
 
 inline dd_real dd_real::accurate_div(const dd_real &a, const dd_real &b) {
   double q1, q2, q3;
   dd_real r;
 
-  q1 = a.x[0] / b.x[0];  /* approximate quotient */
+  const bool rescale = dd_real_div_needs_rescale(a.x[0]);
+  const dd_real aa = rescale ? mul_pwr2(a, 0x1p-53) : a;
 
-  r = a - q1 * b;
+  q1 = aa.x[0] / b.x[0];  /* approximate quotient */
+
+  r = aa - q1 * b;
   
   q2 = r.x[0] / b.x[0];
   r -= (q2 * b);
@@ -337,7 +357,7 @@ inline dd_real dd_real::accurate_div(const dd_real &a, const dd_real &b) {
 
   q1 = qd::quick_two_sum(q1, q2, q2);
   r = dd_real(q1, q2) + q3;
-  return r;
+  return rescale ? mul_pwr2(r, 0x1p+53) : r;
 }
 
 /* double-double / double-double */

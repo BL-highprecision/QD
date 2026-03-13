@@ -17,6 +17,7 @@
 #include <iomanip>
 #include <string>
 #include <sstream>
+#include <limits>
 #include <qd/qd_real.h>
 
 using std::cout;
@@ -62,6 +63,53 @@ bool check(string str, string true_str) {
 }
 
 template <class T>
+bool check_finite(const char *label, const T &x) {
+  bool pass = !x.isnan() && !x.isinf();
+  if (!pass) {
+    cout << "     fail: " << label << " is not finite: " << x << endl;
+  } else if (flag_verbose) {
+    cout << "     pass: " << label << " is finite: " << x << endl;
+  }
+  return pass;
+}
+
+template <class T>
+bool check_positive(const char *label, const T &x) {
+  bool pass = x > 0.0;
+  if (!pass) {
+    cout << "     fail: " << label << " is not positive: " << x << endl;
+  } else if (flag_verbose) {
+    cout << "     pass: " << label << " is positive: " << x << endl;
+  }
+  return pass;
+}
+
+template <class T>
+bool check_rel_close(const char *label, const T &got, const T &expected, double tol) {
+  T scale = abs(expected);
+  if (scale.is_zero()) {
+    scale = 1.0;
+  }
+
+  T rel = abs(got - expected) / scale;
+  double rel_d = std::abs(to_double(rel));
+  bool pass = !rel.isnan() && !rel.isinf() && rel_d <= tol;
+
+  if (!pass) {
+    cout << std::setprecision(17);
+    cout << "     fail: " << label << " relative error " << rel_d
+         << " exceeds tolerance " << tol << endl;
+    cout << "       got:      " << got << endl;
+    cout << "       expected: " << expected << endl;
+  } else if (flag_verbose) {
+    cout << std::setprecision(17);
+    cout << "     pass: " << label << " relative error " << rel_d
+         << " <= " << tol << endl;
+  }
+  return pass;
+}
+
+template <class T>
 bool test_huge() {
   bool pass = true;
   int digits = T::_ndigits - 1;
@@ -92,6 +140,78 @@ bool test_max(string true_str) {
   int digits = T::_ndigits - 1;
   pass &= check(T::_max.to_string(digits), true_str);
   pass &= check((-T::_max).to_string(digits), "-" + true_str);
+  return pass;
+}
+
+bool test_dd_regression() {
+  bool pass = true;
+  const dd_real maxv = dd_real::_max;
+  const dd_real one_dd = dd_real(1.0);
+  const double one_d = 1.0;
+  const dd_real denom = dd_real("2.2360679");
+
+  const double dd_eps = std::numeric_limits<dd_real>::epsilon();
+  const double dd_tol_div = 64.0 * dd_eps;
+  const double dd_tol_sqrt = 128.0 * dd_eps;
+
+  dd_real q_dd = maxv / one_dd;
+  pass &= check_finite("dd max / dd one", q_dd);
+  pass &= check_rel_close("dd max / dd one value", q_dd, maxv, dd_tol_div);
+  pass &= check_rel_close("dd max / dd one reconstruction", q_dd * one_dd, maxv, dd_tol_div);
+
+  dd_real q_d = maxv / one_d;
+  pass &= check_finite("dd max / double one", q_d);
+  pass &= check_rel_close("dd max / double one value", q_d, maxv, dd_tol_div);
+  pass &= check_rel_close("dd max / double one reconstruction", q_d * one_d, maxv, dd_tol_div);
+
+  dd_real q_misc = maxv / denom;
+  pass &= check_finite("dd max / 2.2360679", q_misc);
+  pass &= check_rel_close("dd max / 2.2360679 reconstruction", q_misc * denom, maxv, dd_tol_div);
+
+  dd_real root = sqrt(maxv);
+  pass &= check_finite("sqrt(dd max)", root);
+  pass &= check_positive("sqrt(dd max)", root);
+  pass &= check_rel_close("sqrt(dd max)^2 reconstruction", sqr(root), maxv, dd_tol_sqrt);
+
+  return pass;
+}
+
+bool test_qd_regression() {
+  bool pass = true;
+  const qd_real maxv = qd_real::_max;
+  const qd_real one_qd = qd_real(1.0);
+  const dd_real one_dd = dd_real(1.0);
+  const double one_d = 1.0;
+  const qd_real denom = qd_real("2.2360679");
+
+  const double qd_eps = std::numeric_limits<qd_real>::epsilon();
+  const double qd_tol_div = 64.0 * qd_eps;
+  const double qd_tol_sqrt = 128.0 * qd_eps;
+
+  qd_real q_qd = maxv / one_qd;
+  pass &= check_finite("qd max / qd one", q_qd);
+  pass &= check_rel_close("qd max / qd one value", q_qd, maxv, qd_tol_div);
+  pass &= check_rel_close("qd max / qd one reconstruction", q_qd * one_qd, maxv, qd_tol_div);
+
+  qd_real q_dd = maxv / one_dd;
+  pass &= check_finite("qd max / dd one", q_dd);
+  pass &= check_rel_close("qd max / dd one value", q_dd, maxv, qd_tol_div);
+  pass &= check_rel_close("qd max / dd one reconstruction", q_dd * qd_real(one_dd), maxv, qd_tol_div);
+
+  qd_real q_d = maxv / one_d;
+  pass &= check_finite("qd max / double one", q_d);
+  pass &= check_rel_close("qd max / double one value", q_d, maxv, qd_tol_div);
+  pass &= check_rel_close("qd max / double one reconstruction", q_d * one_d, maxv, qd_tol_div);
+
+  qd_real q_misc = maxv / denom;
+  pass &= check_finite("qd max / 2.2360679", q_misc);
+  pass &= check_rel_close("qd max / 2.2360679 reconstruction", q_misc * denom, maxv, qd_tol_div);
+
+  qd_real root = sqrt(maxv);
+  pass &= check_finite("sqrt(qd max)", root);
+  pass &= check_positive("sqrt(qd max)", root);
+  pass &= check_rel_close("sqrt(qd max)^2 reconstruction", sqr(root), maxv, qd_tol_sqrt);
+
   return pass;
 }
 
@@ -130,23 +250,28 @@ int main(int argc, char *argv[]) {
   cout << "Testing output of huge numbers..." << endl;
 
   if (flag_test_dd) {
+    bool dd_pass = true;
     cout << endl;
     cout << "Testing dd_real ..." << endl;
-    pass &= test_huge<dd_real>();
-    pass &= test_max<dd_real>("1.797693134862315807937289714053e+308");
-    print_result(pass);
+    dd_pass &= test_huge<dd_real>();
+    dd_pass &= test_max<dd_real>("1.797693134862315807937289714053e+308");
+    dd_pass &= test_dd_regression();
+    print_result(dd_pass);
+    pass &= dd_pass;
   }
 
   if (flag_test_qd) {
+    bool qd_pass = true;
     cout << endl;
     cout << "Testing qd_real ..." << endl;
-    pass &= test_huge<qd_real>();
-    pass &= test_max<qd_real>(
+    qd_pass &= test_huge<qd_real>();
+    qd_pass &= test_max<qd_real>(
         "1.7976931348623158079372897140530286112296785259868571699620069e+308");
-    print_result(pass);
+    qd_pass &= test_qd_regression();
+    print_result(qd_pass);
+    pass &= qd_pass;
   }
   
   fpu_fix_end(&old_cw);
   return (pass ? 0 : 1);
 }
-

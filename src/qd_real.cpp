@@ -40,12 +40,48 @@ using std::setw;
 using namespace qd;
 
 namespace {
-
-/* Rescale very large numerators by 2^-53 before quotient reconstruction
-   so intermediate products such as q0 * b and qk * b do not overflow in
-   double.  The 2^969 threshold leaves enough headroom for reconstruction. */
+/* Division: rescale by 2^-53 to prevent overflow in intermediate products
+   like q0*b during reconstruction. With threshold 2^969, rescaled values
+   and their products stay well below DBL_MAX (2^1024). */
 inline bool qd_real_div_needs_rescale(double a_hi) {
   return std::fabs(a_hi) > 0x1p+969;
+}
+
+/* Sqrt: scale huge inputs by 1/4 before Newton refinement and scale the
+   result back by 2 using sqrt(a) = 2 * sqrt(a / 4). This avoids overflow
+   in the qd division work inside the Newton update, where intermediate
+   reconstruction products can exceed DBL_MAX for very large operands.
+   The 2^969 cutoff keeps the rescaled path comfortably below that range. */
+inline bool qd_real_sqrt_needs_rescale(double a_hi) {
+  return std::fabs(a_hi) > 0x1p+969;
+}
+
+qd_real fsqrt_core(const qd_real &a, int &flag) {
+  int i;
+  double e, eps;
+
+  qd_real diff;
+  qd_real half = "0.5000000000000000000000000000000000"
+                 "000000000000000000000000000000000000";
+
+  eps = std::numeric_limits<qd_real>::epsilon();
+
+  qd_real x = std::sqrt(a[0]);
+  qd_real y;
+
+  for (i = 0; i < 10; i++) {
+    y = half * (x + a / x);
+    diff = x - y;
+    x = y;
+    e = fabs(((diff[3] + diff[2]) + diff[1]) + diff[0]);
+    if (e < fabs(x.x[0]) * eps) {
+      flag = 0; // convergence achieved
+      return x;
+    }
+  }
+
+  flag = 1; // failed to converge
+  return x;
 }
 
 } // namespace
@@ -779,13 +815,6 @@ QD_API qd_real fsqrt(const qd_real &a, int &flag) {
      3. repeat 2 until corrections are small
   */
 
-  int i;
-  double e, eps;
-
-  qd_real r, diff;
-  qd_real half = "0.5000000000000000000000000000000000"
-                 "000000000000000000000000000000000000";
-
   if (a.is_zero())
     return (qd_real) 0.0;
 
@@ -794,24 +823,13 @@ QD_API qd_real fsqrt(const qd_real &a, int &flag) {
     return qd_real::_nan;
   }
 
-  eps = std::numeric_limits<qd_real>::epsilon();
-
-  qd_real x = std::sqrt(a[0]);
-  qd_real y;
-
-  for (i=0; i < 10; i++) {
-      y = half * (x + a / x);
-      diff = x - y;
-      x = y;
-      e = fabs(((diff[3] + diff[2]) + diff[1]) + diff[0]);
-      if (e < fabs(x.x[0]) * eps) {
-          flag = 0; // convergence achieved
-          return x;
-      }
+  /* Avoid overflow in the Newton/Heron refinement for extremely large
+     inputs by using the exact identity sqrt(a) = 2 * sqrt(a / 4). */
+  if (qd_real_sqrt_needs_rescale(a[0])) {
+    return mul_pwr2(fsqrt_core(mul_pwr2(a, 0.25), flag), 2.0);
   }
 
-  flag = 1; // failed to converge
-  return x;
+  return fsqrt_core(a, flag);
 }
 
 QD_API qd_real sqrt(const qd_real &a) {

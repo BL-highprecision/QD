@@ -162,74 +162,338 @@ bool test_max(string true_str) {
   return pass;
 }
 
+// check_exact: require operator==-level exact equality.
+// Use only when the mathematically exact result is representable in T
+// and the operation is expected to produce that canonical result.
+// For dd/qd, operator== compares all component words.
+template <class T>
+bool check_exact(const char *label, const T &got, const T &expected) {
+  const bool pass = (got == expected);
+  if (!pass) {
+    // Save and restore stream state; failure output for dd/qd needs more than
+    // 17 digits to distinguish component words.
+    const std::streamsize    old_prec  = cout.precision();
+    const std::ios::fmtflags old_flags = cout.flags();
+    cout << std::scientific
+         << std::setprecision(std::numeric_limits<T>::digits10 + 8);
+    cout << "     fail: " << label << " not exactly equal under operator==" << endl;
+    cout << "       got:      " << got      << endl;
+    cout << "       expected: " << expected << endl;
+    cout.precision(old_prec);
+    cout.flags(old_flags);
+  } else if (flag_verbose) {
+    cout << "     pass: " << label << " exactly equal under operator==" << endl;
+  }
+  return pass;
+}
+
+// -----------------------------------------------------------------------
+// Large-value regression tests, parameterized by type T.
+//
+// Sections:
+//   1. DBL_MAX boundary      - scaled reconstruction; raw skip documented
+//   2. Overflow neighborhood - nextafter(2^512) bracket (not "just-below/at/above":
+//                              2^512 is a coarse sample near sqrt(DBL_MAX), not
+//                              the exact threshold for any one operation)
+//   3. Tail-preserving       - binary-exact multi-word inputs, gap > tol_tail
+//   4. Large / large ~ 1     - direct value check against binary-exact expected
+//   5. Small output path     - 1 / large, direct value check
+//   6. Negative path         - -large / denom
+//   7. Exact oracle          - power-of-two near double exponent limit
+//
+// tag: caller-supplied prefix ("dd" / "qd") for log disambiguation.
+// -----------------------------------------------------------------------
+template <class T>
+bool test_large_regression(const char *tag) {
+  bool pass = true;
+  const double eps      = std::numeric_limits<T>::epsilon();
+  const double tol      =  64.0 * eps;
+  const double tol_sq   = 128.0 * eps;
+  // tight: binary-exact inputs have gap 2^-95 ~ 2.5e-29; 4*dd_eps ~ 2e-31
+  const double tol_tail =   4.0 * eps;
+
+  // ---- Section 1: DBL_MAX boundary ----
+  // Raw reconstruction (result ~ DBL_MAX): two_sum(DBL_MAX, correction) overflows
+  // unconditionally; known QD library limitation.  Scaled by 0.5 (exact in binary)
+  // keeps intermediates below DBL_MAX and is runnable.
+  {
+    const T maxv = T::_max;
+    const T half(0.5);
+    const T qrtr(0.25);
+    const T denom("2.2360679774997896");
+
+    T q = maxv / denom;
+    {
+      const std::string name = std::string(tag) + " max/denom finite";
+      pass &= check_finite(name.c_str(), q);
+    }
+    {
+      const std::string name = std::string(tag) + " max/denom reconstruction";
+      SKIP_RECONSTRUCTION(name.c_str());
+    }
+    {
+      const std::string name = std::string(tag) + " max/denom scaled reconstruction";
+      pass &= check_rel_close(name.c_str(), (q * half) * denom, maxv * half, tol);
+    }
+
+    T root = sqrt(maxv);
+    {
+      const std::string name = std::string(tag) + " sqrt(max) finite";
+      pass &= check_finite(name.c_str(), root);
+    }
+    {
+      const std::string name = std::string(tag) + " sqrt(max) positive";
+      pass &= check_positive(name.c_str(), root);
+    }
+    {
+      const std::string name = std::string(tag) + " sqrt(max)^2 reconstruction";
+      SKIP_RECONSTRUCTION(name.c_str());
+    }
+    {
+      const std::string name = std::string(tag) + " sqrt(max) scaled reconstruction";
+      pass &= check_rel_close(name.c_str(), sqr(root * half), maxv * qrtr, tol_sq);
+    }
+  }
+
+  // ---- Section 2: Overflow neighborhood around 2^512 ----
+  // sqrt(DBL_MAX) = 2^512 * sqrt(1 - 2^-53), slightly less than 2^512.
+  // 2^512 is not the exact rescale threshold for any one operation; it is a
+  // coarse landmark.  Use nextafter to bracket the binary64 double value
+  // of 2^512 with its immediate neighbors, so the three cases are
+  // distinguishable at the ulp level.
+  {
+    const T denom("2.2360679774997896");
+    const double thr   = std::ldexp(1.0, 512);
+    const double below = std::nextafter(thr, 0.0);
+    const double above = std::nextafter(thr,
+                             std::numeric_limits<double>::infinity());
+
+    struct { const char *label; double val; } cases[] = {
+      { "nextbelow(2^512)", below },
+      { "2^512",            thr   },
+      { "nextabove(2^512)", above },
+    };
+    for (const auto &c : cases) {
+      T x(c.val);
+
+      {
+        const std::string name = std::string(tag) + " div(" + c.label + ") finite";
+        pass &= check_finite(name.c_str(), x / denom);
+      }
+      {
+        T q = x / denom;
+        const std::string name = std::string(tag) + " div(" + c.label + ") reconstruction";
+        pass &= check_rel_close(name.c_str(), q * denom, x, tol);
+      }
+      {
+        T r = sqrt(x);
+        const std::string nf = std::string(tag) + " sqrt(" + c.label + ") finite";
+        const std::string np = std::string(tag) + " sqrt(" + c.label + ") positive";
+        const std::string nr = std::string(tag) + " sqrt(" + c.label + ")^2 reconstruction";
+        pass &= check_finite(nf.c_str(), r);
+        pass &= check_positive(np.c_str(), r);
+        pass &= check_rel_close(nr.c_str(), sqr(r), x, tol_sq);
+      }
+    }
+  }
+
+  // ---- Section 3: Tail-preserving (binary-exact multi-word inputs) ----
+  // a = 2^600 + 2^505 + 2^400.
+  // Gap ratio 2^505 / 2^600 = 2^-95 ~ 2.5e-29.
+  // tol_tail = 4*dd_eps ~ 2e-31, so loss of the 2^505 word is caught by ~100x.
+  // For dd: 2^400 is below precision (harmless).
+  // For qd: 2^400 stresses word[3].
+  //
+  // Division by 2^5 (=32) is exact, so the expected quotient is known:
+  //   expect_q = 2^595 + 2^500 + 2^395
+  {
+    const T a = T(std::ldexp(1.0, 600))
+              + T(std::ldexp(1.0, 505))
+              + T(std::ldexp(1.0, 400));
+    const T denom(32.0);  // 2^5, exact
+
+    const T expect_q = T(std::ldexp(1.0, 595))
+                     + T(std::ldexp(1.0, 500))
+                     + T(std::ldexp(1.0, 395));
+
+    T q = a / denom;
+    {
+      const std::string name = std::string(tag) + " tail div finite";
+      pass &= check_finite(name.c_str(), q);
+    }
+    {
+      // "reference value": the mathematical result is exactly representable in T,
+      // but this section tests tail preservation under the general division path,
+      // not operator==-level identity.  Strict exact-equality checks are reserved
+      // for the simpler power-of-two oracle cases in Sections 5 and 7.
+      const std::string name = std::string(tag) + " tail div reference value";
+      pass &= check_rel_close(name.c_str(), q, expect_q, tol_tail);
+    }
+    {
+      const std::string name = std::string(tag) + " tail div reconstruction";
+      pass &= check_rel_close(name.c_str(), q * denom, a, tol_tail);
+    }
+
+    T r = sqrt(a);
+    {
+      const std::string nf = std::string(tag) + " tail sqrt finite";
+      const std::string np = std::string(tag) + " tail sqrt positive";
+      const std::string nr = std::string(tag) + " tail sqrt reconstruction";
+      pass &= check_finite(nf.c_str(), r);
+      pass &= check_positive(np.c_str(), r);
+      pass &= check_rel_close(nr.c_str(), sqr(r), a, tol_sq);
+    }
+  }
+
+  // ---- Section 4: Large / large ~ 1, direct value check ----
+  // All inputs are binary-exact; expected value is exact.
+  // Checks that q retains 1 + 2^-95 (+ 2^-200 for qd), not merely q > 1.
+  {
+    const T b      = T(std::ldexp(1.0, 600));
+    const T a      = b
+                   + T(std::ldexp(1.0, 505))
+                   + T(std::ldexp(1.0, 400));
+    const T expect = T(1.0)
+                   + T(std::ldexp(1.0, -95))
+                   + T(std::ldexp(1.0, -200));
+
+    T q = a / b;
+    {
+      const std::string name = std::string(tag) + " near-one quotient finite";
+      pass &= check_finite(name.c_str(), q);
+    }
+    {
+      const std::string name = std::string(tag) + " near-one quotient value";
+      pass &= check_rel_close(name.c_str(), q, expect, tol_tail);
+    }
+  }
+
+  // ---- Section 5: Small output path (1 / large) ----
+  // 1 / 2^600 = 2^-600 is exactly representable in T as a power-of-two;
+  // use check_exact for both direct value and verify reconstruction with check_rel_close.
+  {
+    const T x(std::ldexp(1.0, 600));
+    const T one(1.0);
+    const T expect_inv(std::ldexp(1.0, -600));
+
+    T inv = one / x;
+    {
+      const std::string name = std::string(tag) + " 1/2^600 finite";
+      pass &= check_finite(name.c_str(), inv);
+    }
+    {
+      // 1/2^600 = 2^-600: representable exactly as a power-of-two; use check_exact.
+      const std::string name = std::string(tag) + " 1/2^600 exact value";
+      pass &= check_exact(name.c_str(), inv, expect_inv);
+    }
+    {
+      const std::string name = std::string(tag) + " 1/2^600 reconstruction";
+      pass &= check_rel_close(name.c_str(), inv * x, one, tol);
+    }
+  }
+
+  // ---- Section 6: Negative path (-large / denom) ----
+  // Sign propagation through rescaled division.
+  {
+    const T x_neg(std::ldexp(-1.0, 600));
+    const T denom("2.2360679774997896");
+
+    T qn = x_neg / denom;
+    {
+      const std::string name = std::string(tag) + " -2^600/denom finite";
+      pass &= check_finite(name.c_str(), qn);
+    }
+    {
+      const std::string name = std::string(tag) + " -2^600/denom reconstruction";
+      pass &= check_rel_close(name.c_str(), qn * denom, x_neg, tol);
+    }
+  }
+
+  // ---- Section 7: Exact power-of-two oracle (near double exponent limit) ----
+  // All expected values are binary-exact and exactly representable in T.
+  // Division cases use check_exact; sqrt uses check_rel_close because
+  // dd/qd sqrt does not guarantee exact-rounding.
+
+  // sqrt(2^1000) == 2^500: dd/qd sqrt may not be exact-rounding; use check_rel_close.
+  {
+    const T p1000(std::ldexp(1.0, 1000));
+    const T p500 (std::ldexp(1.0,  500));
+    const std::string name = std::string(tag) + " sqrt(2^1000) reference value";
+    pass &= check_rel_close(name.c_str(), sqrt(p1000), p500, tol_sq);
+  }
+
+  // 2^1020 / 2^5 == 2^1015: both operands are exact powers-of-two; use check_exact.
+  {
+    const T p1020(std::ldexp(1.0, 1020));
+    const T p5   (32.0);
+    const T p1015(std::ldexp(1.0, 1015));
+    const std::string name = std::string(tag) + " 2^1020/2^5 exact value";
+    pass &= check_exact(name.c_str(), p1020 / p5, p1015);
+  }
+
+  // 2^1020 / 1 == 2^1020: identity on exact power-of-two; use check_exact.
+  {
+    const T p1020(std::ldexp(1.0, 1020));
+    const T one(1.0);
+    const std::string name = std::string(tag) + " 2^1020/1 exact value";
+    pass &= check_exact(name.c_str(), p1020 / one, p1020);
+  }
+
+  return pass;
+}
+
 bool test_dd_regression() {
   bool pass = true;
-  const dd_real maxv = dd_real::_max;
+  const dd_real maxv   = dd_real::_max;
   const dd_real one_dd = dd_real(1.0);
-  const double one_d = 1.0;
-  const dd_real denom = dd_real("2.2360679");
+  const double  one_d  = 1.0;
 
-  const double dd_eps = std::numeric_limits<dd_real>::epsilon();
+  const double dd_eps     = std::numeric_limits<dd_real>::epsilon();
   const double dd_tol_div = 64.0 * dd_eps;
-  const double dd_tol_sqrt = 128.0 * dd_eps;
 
+  // Division by one: verify value survives the operation
   dd_real q_dd = maxv / one_dd;
-  pass &= check_finite("dd max / dd one", q_dd);
-  pass &= check_rel_close("dd max / dd one value", q_dd, maxv, dd_tol_div);
+  pass &= check_finite  ("dd max / dd one finite",     q_dd);
+  pass &= check_rel_close("dd max / dd one value",     q_dd, maxv, dd_tol_div);
   SKIP_RECONSTRUCTION("dd max / dd one reconstruction");
 
   dd_real q_d = maxv / one_d;
-  pass &= check_finite("dd max / double one", q_d);
+  pass &= check_finite  ("dd max / double one finite", q_d);
   pass &= check_rel_close("dd max / double one value", q_d, maxv, dd_tol_div);
   SKIP_RECONSTRUCTION("dd max / double one reconstruction");
 
-  dd_real q_misc = maxv / denom;
-  pass &= check_finite("dd max / 2.2360679", q_misc);
-  SKIP_RECONSTRUCTION("dd max / 2.2360679 reconstruction");
-
-  dd_real root = sqrt(maxv);
-  pass &= check_finite("sqrt(dd max)", root);
-  pass &= check_positive("sqrt(dd max)", root);
-  SKIP_RECONSTRUCTION("sqrt(dd max)^2 reconstruction");
+  pass &= test_large_regression<dd_real>("dd");
 
   return pass;
 }
 
 bool test_qd_regression() {
   bool pass = true;
-  const qd_real maxv = qd_real::_max;
+  const qd_real maxv   = qd_real::_max;
   const qd_real one_qd = qd_real(1.0);
   const dd_real one_dd = dd_real(1.0);
-  const double one_d = 1.0;
-  const qd_real denom = qd_real("2.2360679");
+  const double  one_d  = 1.0;
 
-  const double qd_eps = std::numeric_limits<qd_real>::epsilon();
+  const double qd_eps     = std::numeric_limits<qd_real>::epsilon();
   const double qd_tol_div = 64.0 * qd_eps;
-  const double qd_tol_sqrt = 128.0 * qd_eps;
 
+  // Division by one (qd / dd / double): verify value survives
   qd_real q_qd = maxv / one_qd;
-  pass &= check_finite("qd max / qd one", q_qd);
-  pass &= check_rel_close("qd max / qd one value", q_qd, maxv, qd_tol_div);
+  pass &= check_finite  ("qd max / qd one finite",     q_qd);
+  pass &= check_rel_close("qd max / qd one value",     q_qd, maxv, qd_tol_div);
   SKIP_RECONSTRUCTION("qd max / qd one reconstruction");
 
   qd_real q_dd = maxv / one_dd;
-  pass &= check_finite("qd max / dd one", q_dd);
-  pass &= check_rel_close("qd max / dd one value", q_dd, maxv, qd_tol_div);
+  pass &= check_finite  ("qd max / dd one finite",     q_dd);
+  pass &= check_rel_close("qd max / dd one value",     q_dd, maxv, qd_tol_div);
   SKIP_RECONSTRUCTION("qd max / dd one reconstruction");
 
   qd_real q_d = maxv / one_d;
-  pass &= check_finite("qd max / double one", q_d);
+  pass &= check_finite  ("qd max / double one finite", q_d);
   pass &= check_rel_close("qd max / double one value", q_d, maxv, qd_tol_div);
   SKIP_RECONSTRUCTION("qd max / double one reconstruction");
 
-  qd_real q_misc = maxv / denom;
-  pass &= check_finite("qd max / 2.2360679", q_misc);
-  SKIP_RECONSTRUCTION("qd max / 2.2360679 reconstruction");
-
-  qd_real root = sqrt(maxv);
-  pass &= check_finite("sqrt(qd max)", root);
-  pass &= check_positive("sqrt(qd max)", root);
-  SKIP_RECONSTRUCTION("sqrt(qd max)^2 reconstruction");
+  pass &= test_large_regression<qd_real>("qd");
 
   return pass;
 }

@@ -216,11 +216,20 @@ bool test_large_regression(const char *tag) {
   // Raw reconstruction (result ~ DBL_MAX): two_sum(DBL_MAX, correction) overflows
   // unconditionally; known QD library limitation.  Scaled by 0.5 (exact in binary)
   // keeps intermediates below DBL_MAX and is runnable.
+  //
+  // Expected values are constructed from double (ldexp is exact for power-of-two
+  // scaling) to avoid two_prod(DBL_MAX, 0.5/0.25) -> split(DBL_MAX) -> NaN
+  // in the absence of hardware FMA.
   {
     const T maxv = T::_max;
     const T half(0.5);
-    const T qrtr(0.25);
     const T denom("2.2360679774997896");
+
+    // mul_pwr2 scales each component word by a power-of-two without calling
+    // two_prod, so it is safe regardless of FMA availability and preserves
+    // full dd/qd precision in the expected value.
+    const T maxv_half = mul_pwr2(maxv, 0.5);
+    const T maxv_qrtr = mul_pwr2(maxv, 0.25);
 
     T q = maxv / denom;
     {
@@ -233,7 +242,7 @@ bool test_large_regression(const char *tag) {
     }
     {
       const std::string name = std::string(tag) + " max/denom scaled reconstruction";
-      pass &= check_rel_close(name.c_str(), (q * half) * denom, maxv * half, tol);
+      pass &= check_rel_close(name.c_str(), (q * half) * denom, maxv_half, tol);
     }
 
     T root = sqrt(maxv);
@@ -251,7 +260,7 @@ bool test_large_regression(const char *tag) {
     }
     {
       const std::string name = std::string(tag) + " sqrt(max) scaled reconstruction";
-      pass &= check_rel_close(name.c_str(), sqr(root * half), maxv * qrtr, tol_sq);
+      pass &= check_rel_close(name.c_str(), sqr(root * half), maxv_qrtr, tol_sq);
     }
   }
 

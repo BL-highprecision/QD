@@ -69,6 +69,8 @@ AC_PROG_CC
 
 
 # --enable-fma
+# Selects the FMA API (gnu/c99/ibm/ia64/compiler).  Does NOT touch -march
+# or -mfma; ISA-specific codegen flags are the user's responsibility.
 AC_ARG_ENABLE([fma], AS_HELP_STRING(--enable-fma, [use fused multiply-add/subtract (auto,gnu,ia64,c99,ibm,compiler).  Use this option with care.  [[default=auto]]]))
 if test "x$enable_fma" = "x"; then
   enable_fma="auto"
@@ -81,12 +83,19 @@ case "$enable_fma" in
     fi
   ;;
   auto)
+    dnl Probe compiler/libm capability only; no configure-time CPU detection.
+    dnl Keeping host-specific API preference order for powerpc and ia64, but
+    dnl falling back to gnu/c99 on all other targets so that aarch64, riscv64,
+    dnl and similar architectures are not silently left with FMA disabled.
     case $host in
       powerpc*-*-*)
-        AX_CXX_FMA(["ibm gnu"])
+        AX_CXX_FMA(["ibm gnu c99"])
       ;;
       ia64-*)
-        AX_CXX_FMA(["ia64 gnu"])
+        AX_CXX_FMA(["ia64 gnu c99"])
+      ;;
+      *)
+        AX_CXX_FMA(["gnu c99"])
       ;;
     esac
   ;;
@@ -109,6 +118,109 @@ else
   AC_DEFINE_UNQUOTED([QD_FMS(x,y,z)], [$ax_cxx_fms], 
     [If fused multiply-subtract is available, define correct macro for using it.])
 fi
+
+# Add floating-point contraction policy flags.
+#
+# Implicit FP contraction can silently break the error-free transforms that
+# dd/qd arithmetic depends on, regardless of whether the FMA API is active.
+# Therefore one of the following compiler options is required everywhere:
+# -fp-model strict or -ffp-contract=off.
+#
+# Probe unconditionally for such a flag, append the first supported one to
+# CXXFLAGS, and fail configure if neither is accepted.
+#
+# The probe tries -fp-model strict first so Intel oneAPI compilers (icx/icpx)
+# pick the strict FP mode they require.  GCC and Clang reject -fp-model strict
+# and fall through to -ffp-contract=off, which suppresses implicit contraction
+# without forcing full strict semantics.  No compiler banner parsing is needed;
+# the probe order does the right thing automatically.
+#
+# Deliberately do NOT add -mfma here: that would raise the x86-64 ISA
+# baseline based on the build host, which is wrong for cross builds,
+# packaging, and generic binary distribution.  Users who want hardware
+# FMA instructions should pass -mfma or an appropriate -march/-mcpu flag
+# explicitly in CXXFLAGS, or use --with-arch below.
+AC_MSG_CHECKING([for flag to suppress implicit FP contraction])
+fma_added_cxxflags=""
+saved_CXXFLAGS="$CXXFLAGS"
+found_contract_flag="no"
+for flag in "-fp-model strict" "-ffp-contract=off"; do
+  CXXFLAGS="$saved_CXXFLAGS $flag"
+  AC_COMPILE_IFELSE([AC_LANG_PROGRAM([], [])],
+    [fma_added_cxxflags="$flag"
+     found_contract_flag="yes"
+     break],
+    [])
+done
+CXXFLAGS="$saved_CXXFLAGS"
+if test "$found_contract_flag" = "yes"; then
+  CXXFLAGS="$CXXFLAGS $fma_added_cxxflags"
+  AC_MSG_RESULT([$fma_added_cxxflags])
+else
+  AC_MSG_RESULT([none found])
+  AC_MSG_ERROR([cannot find a compiler flag to suppress implicit FP contraction; need either -fp-model strict or -ffp-contract=off])
+fi
+
+# --with-arch
+# Controls ISA-specific code generation.  This is the explicit opt-in for
+# -march flags that --enable-fma deliberately avoids.  Using native or
+# x86-64-v3 may produce binaries that require FMA3 instructions; combine
+# with --enable-fma if you want QD_FMA/QD_FMS to map to hardware FMA.
+#
+# Each non-generic value is probed with AC_COMPILE_IFELSE to verify that
+# the compiler actually accepts the flag before it is appended to CXXFLAGS.
+# native is additionally rejected outright under cross compilation because
+# -march=native inspects the build host CPU and produces binaries that may
+# not run on the intended target.
+AC_ARG_WITH([arch],
+  [AS_HELP_STRING([--with-arch=@<:@generic|x86-64-v3|native@:>@],
+    [select code generation target @<:@default=generic@:>@])],
+  [with_arch="$withval"],
+  [with_arch="generic"])
+arch_cxxflags=""
+case "$with_arch" in
+  generic)
+    ;;
+  x86-64-v3)
+    case "$host_cpu" in
+      x86_64|amd64)
+        AC_MSG_CHECKING([whether $CXX accepts -march=x86-64-v3])
+        saved_CXXFLAGS="$CXXFLAGS"
+        CXXFLAGS="$saved_CXXFLAGS -march=x86-64-v3"
+        AC_COMPILE_IFELSE([AC_LANG_PROGRAM([], [])],
+          [arch_cxxflags="-march=x86-64-v3"
+           AC_MSG_RESULT([yes])],
+          [AC_MSG_RESULT([no])
+           AC_MSG_ERROR([$CXX does not accept -march=x86-64-v3])])
+        CXXFLAGS="$saved_CXXFLAGS"
+        ;;
+      *)
+        AC_MSG_ERROR([--with-arch=x86-64-v3 is only valid on x86_64 hosts])
+        ;;
+    esac
+    ;;
+  native)
+    if test "$cross_compiling" = yes; then
+      AC_MSG_ERROR([--with-arch=native is not allowed when cross-compiling])
+    fi
+    AC_MSG_CHECKING([whether $CXX accepts -march=native])
+    saved_CXXFLAGS="$CXXFLAGS"
+    CXXFLAGS="$saved_CXXFLAGS -march=native"
+    AC_COMPILE_IFELSE([AC_LANG_PROGRAM([], [])],
+      [arch_cxxflags="-march=native"
+       AC_MSG_RESULT([yes])],
+      [AC_MSG_RESULT([no])
+       AC_MSG_ERROR([$CXX does not accept -march=native])])
+    CXXFLAGS="$saved_CXXFLAGS"
+    ;;
+  *)
+    AC_MSG_ERROR([invalid value for --with-arch: $with_arch])
+    ;;
+esac
+if test "x$arch_cxxflags" != "x"; then
+  CXXFLAGS="$CXXFLAGS $arch_cxxflags"
+fi
+AC_SUBST([ARCH_CXXFLAGS], [$arch_cxxflags])
 
 # Checks for libraries.
 
@@ -247,4 +359,6 @@ echo "  enable sloppy mul = $enable_sloppy_mul"
 echo "  enable sloppy div = $enable_sloppy_div"
 echo "  fma               = $ax_cxx_fma"
 echo "  fms               = $ax_cxx_fms"
+echo "  fma cxxflags      = $fma_added_cxxflags"
+echo "  arch              = $with_arch ($arch_cxxflags)"
 

@@ -215,10 +215,31 @@ inline void round_string_td(char *s, int precision, int *offset) {
   s[precision] = 0;
 }
 
+inline td_real from_qd_truncate(const qd_real &a) {
+  double x0 = a[0];
+  double x1 = a[1];
+  double x2 = a[2];
+  double x3 = a[3];
+  renorm(x0, x1, x2, x3);
+  return td_real(x0, x1, x2);
+}
+
+inline qd_real to_qd_fallback(const td_real &a) {
+  return qd_real(a[0], a[1], a[2], 0.0);
+}
+
 }  // namespace
 
 const td_real td_real::_nan = td_real(qd::_d_nan, qd::_d_nan, qd::_d_nan);
 const td_real td_real::_inf = td_real(qd::_d_inf, qd::_d_inf, qd::_d_inf);
+const td_real td_real::_2pi = td_real(qd_real::_2pi[0], qd_real::_2pi[1], qd_real::_2pi[2]);
+const td_real td_real::_pi = td_real(qd_real::_pi[0], qd_real::_pi[1], qd_real::_pi[2]);
+const td_real td_real::_3pi4 = td_real(qd_real::_3pi4[0], qd_real::_3pi4[1], qd_real::_3pi4[2]);
+const td_real td_real::_pi2 = td_real(qd_real::_pi2[0], qd_real::_pi2[1], qd_real::_pi2[2]);
+const td_real td_real::_pi4 = td_real(qd_real::_pi4[0], qd_real::_pi4[1], qd_real::_pi4[2]);
+const td_real td_real::_e = td_real(qd_real::_e[0], qd_real::_e[1], qd_real::_e[2]);
+const td_real td_real::_log2 = td_real(qd_real::_log2[0], qd_real::_log2[1], qd_real::_log2[2]);
+const td_real td_real::_log10 = td_real(qd_real::_log10[0], qd_real::_log10[1], qd_real::_log10[2]);
 const double td_real::_eps = 5.47382212626881668e-48; /* 2^-157 */
 const double td_real::_min_normalized = 1.80519437586482958e-276; /* 2^(-1022 + 2*53) */
 const td_real td_real::_max = td_real(
@@ -240,6 +261,16 @@ void td_real::error(const char *msg) {
   }
 }
 
+td_real::td_real(const dd_real &dd) {
+  x[0] = dd._hi();
+  x[1] = dd._lo();
+  x[2] = 0.0;
+}
+
+td_real::td_real(const qd_real &qd) {
+  *this = from_qd_truncate(qd);
+}
+
 td_real::td_real(const char *s) {
   if (td_real::read(s, *this)) {
     td_real::error("(td_real::td_real): INPUT ERROR.");
@@ -251,6 +282,18 @@ td_real &td_real::operator=(double a) {
   x[0] = a;
   x[1] = 0.0;
   x[2] = 0.0;
+  return *this;
+}
+
+td_real &td_real::operator=(const dd_real &a) {
+  x[0] = a._hi();
+  x[1] = a._lo();
+  x[2] = 0.0;
+  return *this;
+}
+
+td_real &td_real::operator=(const qd_real &a) {
+  *this = from_qd_truncate(a);
   return *this;
 }
 
@@ -361,6 +404,14 @@ td_real operator+(double a, const td_real &b) {
   return b + a;
 }
 
+td_real operator+(const td_real &a, const dd_real &b) {
+  return a + td_real(b);
+}
+
+td_real operator+(const dd_real &a, const td_real &b) {
+  return td_real(a) + b;
+}
+
 td_real operator+(const td_real &a, const td_real &b) {
   return td_real::ieee_add(a, b);
 }
@@ -389,6 +440,14 @@ td_real operator-(const td_real &a, double b) {
 }
 
 td_real operator-(double a, const td_real &b) {
+  return td_real(a) - b;
+}
+
+td_real operator-(const td_real &a, const dd_real &b) {
+  return a - td_real(b);
+}
+
+td_real operator-(const dd_real &a, const td_real &b) {
   return td_real(a) - b;
 }
 
@@ -448,6 +507,14 @@ td_real operator*(const td_real &a, double b) {
 
 td_real operator*(double a, const td_real &b) {
   return b * a;
+}
+
+td_real operator*(const td_real &a, const dd_real &b) {
+  return a * td_real(b);
+}
+
+td_real operator*(const dd_real &a, const td_real &b) {
+  return td_real(a) * b;
 }
 
 td_real operator*(const td_real &a, const td_real &b) {
@@ -533,6 +600,14 @@ td_real operator/(const td_real &a, double b) {
 }
 
 td_real operator/(double a, const td_real &b) {
+  return td_real(a) / b;
+}
+
+td_real operator/(const td_real &a, const dd_real &b) {
+  return a / td_real(b);
+}
+
+td_real operator/(const dd_real &a, const td_real &b) {
   return td_real(a) / b;
 }
 
@@ -646,6 +721,10 @@ td_real pow(const td_real &a, int n) {
   return npwr(a, n);
 }
 
+td_real pow(const td_real &a, const td_real &b) {
+  return from_qd_truncate(pow(to_qd_fallback(a), to_qd_fallback(b)));
+}
+
 td_real abs(const td_real &a) {
   return (a[0] < 0.0) ? -a : a;
 }
@@ -670,6 +749,14 @@ bool operator==(double a, const td_real &b) {
   return b == a;
 }
 
+bool operator==(const td_real &a, const dd_real &b) {
+  return a == td_real(b);
+}
+
+bool operator==(const dd_real &a, const td_real &b) {
+  return td_real(a) == b;
+}
+
 bool operator==(const td_real &a, const td_real &b) {
   return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];
 }
@@ -682,6 +769,14 @@ bool operator!=(double a, const td_real &b) {
   return !(a == b);
 }
 
+bool operator!=(const td_real &a, const dd_real &b) {
+  return !(a == b);
+}
+
+bool operator!=(const dd_real &a, const td_real &b) {
+  return !(a == b);
+}
+
 bool operator!=(const td_real &a, const td_real &b) {
   return !(a == b);
 }
@@ -691,6 +786,14 @@ bool operator<(const td_real &a, double b) {
 }
 
 bool operator<(double a, const td_real &b) {
+  return td_real(a) < b;
+}
+
+bool operator<(const td_real &a, const dd_real &b) {
+  return a < td_real(b);
+}
+
+bool operator<(const dd_real &a, const td_real &b) {
   return td_real(a) < b;
 }
 
@@ -712,6 +815,14 @@ bool operator>(double a, const td_real &b) {
   return b < td_real(a);
 }
 
+bool operator>(const td_real &a, const dd_real &b) {
+  return td_real(b) < a;
+}
+
+bool operator>(const dd_real &a, const td_real &b) {
+  return b < td_real(a);
+}
+
 bool operator>(const td_real &a, const td_real &b) {
   return b < a;
 }
@@ -721,6 +832,14 @@ bool operator<=(const td_real &a, double b) {
 }
 
 bool operator<=(double a, const td_real &b) {
+  return !(a > b);
+}
+
+bool operator<=(const td_real &a, const dd_real &b) {
+  return !(a > b);
+}
+
+bool operator<=(const dd_real &a, const td_real &b) {
   return !(a > b);
 }
 
@@ -736,8 +855,34 @@ bool operator>=(double a, const td_real &b) {
   return !(a < b);
 }
 
+bool operator>=(const td_real &a, const dd_real &b) {
+  return !(a < b);
+}
+
+bool operator>=(const dd_real &a, const td_real &b) {
+  return !(a < b);
+}
+
 bool operator>=(const td_real &a, const td_real &b) {
   return !(a < b);
+}
+
+dd_real to_dd_real(const td_real &a) {
+  dd_real result(a[0], a[1]);
+  result += a[2];
+  return result;
+}
+
+td_real to_td_real(const dd_real &a) {
+  return td_real(a);
+}
+
+td_real to_td_real(const qd_real &a) {
+  return from_qd_truncate(a);
+}
+
+qd_real to_qd_real(const td_real &a) {
+  return to_qd_fallback(a);
 }
 
 double to_double(const td_real &a) {
@@ -746,6 +891,90 @@ double to_double(const td_real &a) {
 
 int to_int(const td_real &a) {
   return static_cast<int>(a[0]);
+}
+
+/* Phase 2 transcendental layer:
+   These functions currently use explicit qd_real-backed fallback paths.
+   We convert td -> qd, call the existing qd implementation, then
+   renormalize the result back to td precision. */
+td_real exp(const td_real &a) {
+  return from_qd_truncate(exp(to_qd_fallback(a)));
+}
+
+td_real log(const td_real &a) {
+  return from_qd_truncate(log(to_qd_fallback(a)));
+}
+
+td_real log10(const td_real &a) {
+  return from_qd_truncate(log10(to_qd_fallback(a)));
+}
+
+td_real sin(const td_real &a) {
+  return from_qd_truncate(sin(to_qd_fallback(a)));
+}
+
+td_real cos(const td_real &a) {
+  return from_qd_truncate(cos(to_qd_fallback(a)));
+}
+
+td_real tan(const td_real &a) {
+  return from_qd_truncate(tan(to_qd_fallback(a)));
+}
+
+void sincos(const td_real &a, td_real &s, td_real &c) {
+  qd_real qs;
+  qd_real qc;
+  sincos(to_qd_fallback(a), qs, qc);
+  s = from_qd_truncate(qs);
+  c = from_qd_truncate(qc);
+}
+
+td_real asin(const td_real &a) {
+  return from_qd_truncate(asin(to_qd_fallback(a)));
+}
+
+td_real acos(const td_real &a) {
+  return from_qd_truncate(acos(to_qd_fallback(a)));
+}
+
+td_real atan(const td_real &a) {
+  return from_qd_truncate(atan(to_qd_fallback(a)));
+}
+
+td_real atan2(const td_real &y, const td_real &x) {
+  return from_qd_truncate(atan2(to_qd_fallback(y), to_qd_fallback(x)));
+}
+
+td_real sinh(const td_real &a) {
+  return from_qd_truncate(sinh(to_qd_fallback(a)));
+}
+
+td_real cosh(const td_real &a) {
+  return from_qd_truncate(cosh(to_qd_fallback(a)));
+}
+
+td_real tanh(const td_real &a) {
+  return from_qd_truncate(tanh(to_qd_fallback(a)));
+}
+
+void sincosh(const td_real &a, td_real &s, td_real &c) {
+  qd_real qs;
+  qd_real qc;
+  sincosh(to_qd_fallback(a), qs, qc);
+  s = from_qd_truncate(qs);
+  c = from_qd_truncate(qc);
+}
+
+td_real asinh(const td_real &a) {
+  return from_qd_truncate(asinh(to_qd_fallback(a)));
+}
+
+td_real acosh(const td_real &a) {
+  return from_qd_truncate(acosh(to_qd_fallback(a)));
+}
+
+td_real atanh(const td_real &a) {
+  return from_qd_truncate(atanh(to_qd_fallback(a)));
 }
 
 ostream &operator<<(ostream &os, const td_real &td) {

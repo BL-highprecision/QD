@@ -1,4 +1,4 @@
-nobase_include_HEADERS = qd/c_dd.h qd/c_qd.h qd/dd_real.h qd/dd_inline.h \
+nobase_include_HEADERS = qd/c_dd.h qd/c_qd.h qd/c_td.h qd/dd_real.h qd/dd_inline.h \
 			 qd/fpu.h qd/inline.h qd/td_real.h qd/qd_real.h qd/qd_inline.h \
 			 qd/bits.h
 

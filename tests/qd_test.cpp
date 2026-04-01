@@ -104,6 +104,11 @@ public:
   bool test4();
   bool test5();
   bool test6();
+  bool test7();
+  bool test8();
+  bool test9();
+  bool test10();
+  bool test11();
   bool testall();
 };
 
@@ -257,6 +262,161 @@ bool TdTestSuite::test6() {
   return pass;
 }
 
+bool TdTestSuite::test7() {
+  cout << endl;
+  cout << "Test 7.  (Transcendental identity checks)." << endl;
+
+  td_real x("1.234567890123456789");
+  td_real y("0.625");
+  td_real a("0.3");
+  td_real s;
+  td_real c;
+  sincos(y, s, c);
+
+  bool pass = true;
+  pass &= td_check_close(exp(log(x)), td_to_qd(x), 64.0);
+  pass &= td_check_close(log(exp(a)), td_to_qd(a), 64.0);
+  pass &= td_check_close(sqr(s) + sqr(c), qd_real(1.0), 96.0);
+  pass &= td_check_close(tan(y), td_to_qd(s / c), 96.0);
+  pass &= td_check_close(atan(tan(a)), td_to_qd(a), 96.0);
+  pass &= td_check_close(asin(sin(a)), td_to_qd(a), 96.0);
+  pass &= td_check_close(acos(cos(a)), td_to_qd(a), 96.0);
+  pass &= td_check_close(atan2(s, c), td_to_qd(y), 96.0);
+  pass &= td_check_close(sqr(cosh(a)) - sqr(sinh(a)), qd_real(1.0), 128.0);
+
+  if (flag_verbose) {
+    cout << "exp(log(x)) = " << exp(log(x)) << endl;
+    cout << "sin^2+cos^2 = " << (sqr(s) + sqr(c)) << endl;
+    cout << "atan2(s,c)  = " << atan2(s, c) << endl;
+  }
+
+  return pass;
+}
+
+bool TdTestSuite::test8() {
+  cout << endl;
+  cout << "Test 8.  (Random-value qd oracle comparison)." << endl;
+
+  bool pass = true;
+  std::srand(12345);
+
+  for (int i = 0; i < 40; i++) {
+    double u = (std::rand() / static_cast<double>(RAND_MAX)) * 2.0 - 1.0;
+    double v = (std::rand() / static_cast<double>(RAND_MAX)) * 2.0 - 1.0;
+    td_real x = td_real(u) + td_real(v) * td_real("1e-16");
+    td_real p = abs(x) + td_real("0.25");
+
+    pass &= td_check_close(sin(x), sin(td_to_qd(x)), 32.0);
+    pass &= td_check_close(cos(x), cos(td_to_qd(x)), 32.0);
+    pass &= td_check_close(exp(x), exp(td_to_qd(x)), 32.0);
+    pass &= td_check_close(log(p), log(td_to_qd(p)), 32.0);
+    pass &= td_check_close(tanh(x), tanh(td_to_qd(x)), 32.0);
+    pass &= td_check_close(atan(x), atan(td_to_qd(x)), 32.0);
+  }
+
+  return pass;
+}
+
+bool TdTestSuite::test9() {
+  cout << endl;
+  cout << "Test 9.  (Boundary-value checks)." << endl;
+
+  td_real root_max = sqrt(td_real::_max);
+  td_real log_min = log(td_real(td_real::_min_normalized));
+  td_real exp_hi = exp(td_real("800.0"));
+  td_real exp_lo = exp(td_real("-800.0"));
+  qd_real qroot_max = sqrt(to_qd_real(td_real::_max));
+  qd_real qlog_min = log(qd_real(td_real::_min_normalized));
+
+  bool pass = true;
+  pass &= root_max.isfinite();
+  pass &= td_check_close(root_max, qroot_max, 256.0);
+  pass &= td_check_close(log_min, qlog_min, 128.0);
+  pass &= exp_hi.isinf();
+  pass &= exp_lo.is_zero();
+
+  if (flag_verbose) {
+    cout << "sqrt(max) = " << root_max << endl;
+    cout << "log(min)  = " << log_min << endl;
+  }
+
+  return pass;
+}
+
+bool TdTestSuite::test10() {
+  cout << endl;
+  cout << "Test 10.  (Mixed-mode arithmetic and conversion round trips)." << endl;
+
+  dd_real dd("1.234567890123456789012345678901");
+  td_real td("9.876543210987654321098765432109e-10");
+  qd_real qd("3.1415926535897932384626433832795028841971");
+
+  td_real mix_add = td + dd;
+  td_real mix_mul = dd * td;
+  td_real mix_div = td / dd;
+  td_real from_dd = to_td_real(dd);
+  td_real from_qd = to_td_real(qd);
+  dd_real dd_round = to_dd_real(from_dd);
+  qd_real qd_round = to_qd_real(from_qd);
+
+  bool pass = true;
+  pass &= td_check_close(mix_add, qd_real(dd) + td_to_qd(td), 64.0);
+  pass &= td_check_close(mix_mul, qd_real(dd) * td_to_qd(td), 64.0);
+  pass &= td_check_close(mix_div, td_to_qd(td) / qd_real(dd), 64.0);
+  pass &= abs(to_double(qd_real(dd_round) - qd_real(dd))) < 16.0 * dd_real::_eps;
+  pass &= td_check_close(from_qd, qd, 32.0);
+  pass &= to_double(abs(qd_round - qd)) < 64.0 * td_real::_eps * td_scale(qd);
+
+  if (flag_verbose) {
+    cout << "mix_add = " << mix_add << endl;
+    cout << "mix_mul = " << mix_mul << endl;
+    cout << "mix_div = " << mix_div << endl;
+  }
+
+  return pass;
+}
+
+bool TdTestSuite::test11() {
+  cout << endl;
+  cout << "Test 11.  (Special values and string robustness)." << endl;
+
+  td_real nan_value("nan");
+  td_real inf_value("inf");
+  td_real neg_inf("-inf");
+  td_real neg_one("-1.0");
+  qd_suppress_error_messages = true;
+  td_real log_nan = log(neg_one);
+  qd_suppress_error_messages = false;
+
+  td_real a("12345.678901234567890123456789");
+  std::ostringstream sci;
+  std::ostringstream fixed;
+  sci << std::setprecision(td_real::_ndigits) << std::scientific << std::uppercase << std::showpos << a;
+  fixed << std::setprecision(30) << std::fixed << a;
+
+  std::istringstream sci_in(sci.str());
+  std::istringstream fixed_in(fixed.str());
+  td_real sci_rt;
+  td_real fixed_rt;
+  sci_in >> sci_rt;
+  fixed_in >> fixed_rt;
+
+  bool pass = true;
+  pass &= nan_value.isnan();
+  pass &= inf_value.isinf();
+  pass &= neg_inf.isinf() && neg_inf.is_negative();
+  pass &= log_nan.isnan();
+  pass &= td_check_close(sci_rt, td_to_qd(a), 64.0);
+  pass &= td_check_close(fixed_rt, td_to_qd(a), 128.0);
+
+  if (flag_verbose) {
+    cout << "scientific = " << sci.str() << endl;
+    cout << "fixed      = " << fixed.str() << endl;
+  }
+
+  return pass;
+}
+
 bool TdTestSuite::testall() {
   bool pass = true;
   pass &= print_result(test1());
@@ -265,6 +425,11 @@ bool TdTestSuite::testall() {
   pass &= print_result(test4());
   pass &= print_result(test5());
   pass &= print_result(test6());
+  pass &= print_result(test7());
+  pass &= print_result(test8());
+  pass &= print_result(test9());
+  pass &= print_result(test10());
+  pass &= print_result(test11());
   return pass;
 }
 

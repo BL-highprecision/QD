@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <qd/c_qd.h>
+#include <qd/c_td.h>
 
 /* Test 1.  Salamin-Brent quadratically convergent formula for pi. */
 int test_1() {
@@ -67,7 +68,39 @@ int test_1() {
   return 0;
 }
 
+int test_2() {
+  double x[3], y[3], s[3], c[3], t[3], u[3];
+  int r;
+
+  puts("Test 2.  (Triple-double C wrapper smoke test)");
+
+  c_td_read("0.5", x);
+  c_td_sincos(x, s, c);
+  c_td_sqr(s, t);
+  c_td_sqr(c, u);
+  c_td_selfadd(u, t);
+  c_td_sub_td_d(t, 1.0, u);
+  c_td_abs(u, u);
+  c_td_comp_td_d(u, 1e-40, &r);
+  if (r > 0) {
+    puts("  sin^2 + cos^2 != 1");
+    return 1;
+  }
+
+  c_td_exp(x, y);
+  c_td_log(y, t);
+  c_td_sub(t, x, u);
+  c_td_abs(u, u);
+  c_td_comp_td_d(u, 1e-40, &r);
+  if (r > 0) {
+    puts("  log(exp(x)) too far from x");
+    return 1;
+  }
+
+  return 0;
+}
+
 int main(void) {
   fpu_fix_start(NULL);
-  return test_1();
+  return test_1() || test_2();
 }

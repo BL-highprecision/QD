@@ -1,4 +1,4 @@
-SRC = c_dd.cpp c_qd.cpp dd_real.cpp dd_const.cpp td_real.cpp \
+SRC = c_dd.cpp c_qd.cpp c_td.cpp dd_real.cpp dd_const.cpp td_real.cpp \
       fpu.cpp qd_real.cpp qd_const.cpp util.cpp bits.cpp util.h
 
 lib_LTLIBRARIES = libqd.la

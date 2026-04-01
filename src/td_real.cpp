@@ -224,22 +224,161 @@ inline td_real from_qd_truncate(const qd_real &a) {
   return td_real(x0, x1, x2);
 }
 
-inline qd_real to_qd_fallback(const td_real &a) {
+inline qd_real to_qd_conversion(const td_real &a) {
   return qd_real(a[0], a[1], a[2], 0.0);
+}
+
+inline td_real signed_zero(double sign_source) {
+  return td_real(std::copysign(0.0, sign_source));
+}
+
+inline td_real td_nint(const td_real &a) {
+  double x0 = qd::nint(a[0]);
+  double x1 = 0.0;
+  double x2 = 0.0;
+
+  if (x0 == a[0]) {
+    x1 = qd::nint(a[1]);
+    if (x1 == a[1]) {
+      x2 = qd::nint(a[2]);
+    } else if (std::abs(x1 - a[1]) == 0.5 && a[2] < 0.0) {
+      x1 -= 1.0;
+    }
+  } else if (std::abs(x0 - a[0]) == 0.5 && a[1] < 0.0) {
+    x0 -= 1.0;
+  }
+
+  renorm(x0, x1, x2);
+  return td_real(x0, x1, x2);
+}
+
+static const int td_exp_squares = 12;
+static const double td_exp_k = 4096.0;
+static const double td_exp_inv_k = 1.0 / td_exp_k;
+static const td_real td_pi16(1.963495408493620697e-01,
+                             7.654042494670957545e-18,
+                             -1.871731131073962291e-34);
+
+static const double td_sin_table[4][3] = {
+  {1.950903220161282758e-01, -7.991079068461731263e-18,  6.184627002422071324e-34},
+  {3.826834323650897818e-01, -1.005077269646158761e-17, -2.060531630280669539e-34},
+  {5.555702330196021776e-01,  4.709410940561676821e-17, -2.064052038368292118e-33},
+  {7.071067811865475727e-01, -4.833646656726456726e-17,  2.069337654349706787e-33}
+};
+
+static const double td_cos_table[4][3] = {
+  {9.807852804032304306e-01, 1.854693999782500573e-17, -1.069656444553075966e-33},
+  {9.238795325112867385e-01, 1.764504708433667706e-17, -5.044253732158682026e-34},
+  {8.314696123025452357e-01, 1.407385698472802389e-18,  4.695131538398083001e-35},
+  {7.071067811865475727e-01, -4.833646656726456726e-17,  2.069337654349706787e-33}
+};
+
+/* exp(r) - 1 for a tiny reduced argument r. */
+inline td_real expm1_small(const td_real &a) {
+  td_real term = a;
+  td_real sum = a;
+  double n = 1.0;
+  const td_real thresh = td_real(td_real::_eps * td_exp_inv_k);
+
+  do {
+    n += 1.0;
+    term *= a;
+    term /= n;
+    sum += term;
+  } while (abs(term) > thresh);
+
+  return sum;
+}
+
+inline td_real sin_taylor(const td_real &a) {
+  if (a.is_zero()) {
+    return signed_zero(a[0]);
+  }
+
+  const td_real thresh = abs(a) * td_real(td_real::_eps * 0.5);
+  td_real x = -sqr(a);
+  td_real term = a;
+  td_real sum = a;
+  double n = 1.0;
+
+  do {
+    term *= x;
+    term /= (n + 1.0) * (n + 2.0);
+    sum += term;
+    n += 2.0;
+  } while (abs(term) > thresh);
+
+  return sum;
+}
+
+inline td_real cos_taylor(const td_real &a) {
+  if (a.is_zero()) {
+    return 1.0;
+  }
+
+  const td_real thresh = td_real(td_real::_eps * 0.5);
+  td_real x = -sqr(a);
+  td_real term = 1.0;
+  td_real sum = 1.0;
+  double n = 0.0;
+
+  do {
+    term *= x;
+    term /= (n + 1.0) * (n + 2.0);
+    sum += term;
+    n += 2.0;
+  } while (abs(term) > thresh);
+
+  return sum;
+}
+
+inline void sincos_taylor(const td_real &a, td_real &sin_a, td_real &cos_a) {
+  if (a.is_zero()) {
+    sin_a = signed_zero(a[0]);
+    cos_a = 1.0;
+    return;
+  }
+
+  sin_a = sin_taylor(a);
+  cos_a = sqrt(1.0 - sqr(sin_a));
+}
+
+/* Reduce to t with |t| <= pi/32 while tracking pi/2 and pi/16 sectors. */
+inline void reduce_trig_arg(const td_real &a, td_real &t, int &j, int &k) {
+  td_real z = td_nint(a / td_real::_2pi);
+  td_real r = a - td_real::_2pi * z;
+
+  double q = std::floor(r[0] / td_real::_pi2[0] + 0.5);
+  t = r - td_real::_pi2 * q;
+  j = static_cast<int>(q);
+  while (j > 2) j -= 4;
+  while (j < -2) j += 4;
+
+  q = std::floor(t[0] / td_pi16[0] + 0.5);
+  t -= td_pi16 * q;
+  k = static_cast<int>(q);
 }
 
 }  // namespace
 
 const td_real td_real::_nan = td_real(qd::_d_nan, qd::_d_nan, qd::_d_nan);
 const td_real td_real::_inf = td_real(qd::_d_inf, qd::_d_inf, qd::_d_inf);
-const td_real td_real::_2pi = td_real(qd_real::_2pi[0], qd_real::_2pi[1], qd_real::_2pi[2]);
-const td_real td_real::_pi = td_real(qd_real::_pi[0], qd_real::_pi[1], qd_real::_pi[2]);
-const td_real td_real::_3pi4 = td_real(qd_real::_3pi4[0], qd_real::_3pi4[1], qd_real::_3pi4[2]);
-const td_real td_real::_pi2 = td_real(qd_real::_pi2[0], qd_real::_pi2[1], qd_real::_pi2[2]);
-const td_real td_real::_pi4 = td_real(qd_real::_pi4[0], qd_real::_pi4[1], qd_real::_pi4[2]);
-const td_real td_real::_e = td_real(qd_real::_e[0], qd_real::_e[1], qd_real::_e[2]);
-const td_real td_real::_log2 = td_real(qd_real::_log2[0], qd_real::_log2[1], qd_real::_log2[2]);
-const td_real td_real::_log10 = td_real(qd_real::_log10[0], qd_real::_log10[1], qd_real::_log10[2]);
+const td_real td_real::_2pi = td_real(
+    6.283185307179586232e+00, 2.449293598294706414e-16, -5.989539619436679332e-33);
+const td_real td_real::_pi = td_real(
+    3.141592653589793116e+00, 1.224646799147353207e-16, -2.994769809718339666e-33);
+const td_real td_real::_3pi4 = td_real(
+    2.356194490192344837e+00, 9.1848509936051484375e-17, 3.9168984647504003225e-33);
+const td_real td_real::_pi2 = td_real(
+    1.570796326794896558e+00, 6.123233995736766036e-17, -1.497384904859169833e-33);
+const td_real td_real::_pi4 = td_real(
+    7.853981633974482790e-01, 3.061616997868383018e-17, -7.486924524295849165e-34);
+const td_real td_real::_e = td_real(
+    2.718281828459045091e+00, 1.445646891729250158e-16, -2.127717108038176765e-33);
+const td_real td_real::_log2 = td_real(
+    6.931471805599452862e-01, 2.319046813846299558e-17, 5.707708438416212066e-34);
+const td_real td_real::_log10 = td_real(
+    2.302585092994045901e+00, -2.170756223382249351e-16, -9.984262454465776570e-33);
 const double td_real::_eps = 5.47382212626881668e-48; /* 2^-157 */
 const double td_real::_min_normalized = 1.80519437586482958e-276; /* 2^(-1022 + 2*53) */
 const td_real td_real::_max = td_real(
@@ -722,7 +861,7 @@ td_real pow(const td_real &a, int n) {
 }
 
 td_real pow(const td_real &a, const td_real &b) {
-  return from_qd_truncate(pow(to_qd_fallback(a), to_qd_fallback(b)));
+  return exp(b * log(a));
 }
 
 td_real abs(const td_real &a) {
@@ -882,7 +1021,7 @@ td_real to_td_real(const qd_real &a) {
 }
 
 qd_real to_qd_real(const td_real &a) {
-  return to_qd_fallback(a);
+  return to_qd_conversion(a);
 }
 
 double to_double(const td_real &a) {
@@ -893,88 +1032,355 @@ int to_int(const td_real &a) {
   return static_cast<int>(a[0]);
 }
 
-/* Phase 2 transcendental layer:
-   These functions currently use explicit qd_real-backed fallback paths.
-   We convert td -> qd, call the existing qd implementation, then
-   renormalize the result back to td precision. */
 td_real exp(const td_real &a) {
-  return from_qd_truncate(exp(to_qd_fallback(a)));
+  if (a.isnan()) {
+    return td_real::_nan;
+  }
+  if (a.is_zero()) {
+    return 1.0;
+  }
+  if (a.isinf()) {
+    return a.is_positive() ? td_real::_inf : 0.0;
+  }
+  if (a[0] <= -709.0) {
+    return 0.0;
+  }
+  if (a[0] >= 709.0) {
+    return td_real::_inf;
+  }
+  if (a.is_one()) {
+    return td_real::_e;
+  }
+
+  double m = std::floor(a[0] / td_real::_log2[0] + 0.5);
+  td_real r = mul_pwr2(a - td_real::_log2 * m, td_exp_inv_k);
+  td_real s = expm1_small(r);
+
+  for (int i = 0; i < td_exp_squares; i++) {
+    s = mul_pwr2(s, 2.0) + sqr(s);
+  }
+
+  return ldexp(s + 1.0, static_cast<int>(m));
 }
 
 td_real log(const td_real &a) {
-  return from_qd_truncate(log(to_qd_fallback(a)));
+  if (a.isnan()) {
+    return td_real::_nan;
+  }
+  if (a.is_zero()) {
+    return -td_real::_inf;
+  }
+  if (a.is_negative()) {
+    td_real::error("(td_real::log): Non-positive argument.");
+    return td_real::_nan;
+  }
+  if (a.isinf()) {
+    return td_real::_inf;
+  }
+  if (a.is_one()) {
+    return 0.0;
+  }
+
+  int e;
+  double m = std::frexp(a[0], &e);
+  td_real x = td_real(std::log(m)) + td_real::_log2 * static_cast<double>(e);
+
+  x = x + a * exp(-x) - 1.0;
+  x = x + a * exp(-x) - 1.0;
+  x = x + a * exp(-x) - 1.0;
+
+  return x;
 }
 
 td_real log10(const td_real &a) {
-  return from_qd_truncate(log10(to_qd_fallback(a)));
+  return log(a) / td_real::_log10;
 }
 
 td_real sin(const td_real &a) {
-  return from_qd_truncate(sin(to_qd_fallback(a)));
+  td_real s, c;
+  sincos(a, s, c);
+  return s;
 }
 
 td_real cos(const td_real &a) {
-  return from_qd_truncate(cos(to_qd_fallback(a)));
+  td_real s, c;
+  sincos(a, s, c);
+  return c;
 }
 
 td_real tan(const td_real &a) {
-  return from_qd_truncate(tan(to_qd_fallback(a)));
+  td_real s, c;
+  sincos(a, s, c);
+  return s / c;
 }
 
 void sincos(const td_real &a, td_real &s, td_real &c) {
-  qd_real qs;
-  qd_real qc;
-  sincos(to_qd_fallback(a), qs, qc);
-  s = from_qd_truncate(qs);
-  c = from_qd_truncate(qc);
+  if (a.isnan()) {
+    s = c = td_real::_nan;
+    return;
+  }
+  if (a.isinf()) {
+    td_real::error("(td_real::sincos): Infinite argument.");
+    s = c = td_real::_nan;
+    return;
+  }
+  if (a.is_zero()) {
+    s = signed_zero(a[0]);
+    c = 1.0;
+    return;
+  }
+
+  td_real t;
+  int j, k;
+  reduce_trig_arg(a, t, j, k);
+  int abs_j = std::abs(j);
+  int abs_k = std::abs(k);
+
+  if (abs_k > 4) {
+    td_real::error("(td_real::sincos): Cannot reduce modulo pi/16.");
+    s = c = td_real::_nan;
+    return;
+  }
+
+  td_real sin_t;
+  td_real cos_t;
+  td_real ss;
+  td_real cc;
+  sincos_taylor(t, sin_t, cos_t);
+
+  if (abs_k == 0) {
+    ss = sin_t;
+    cc = cos_t;
+  } else {
+    td_real u(td_cos_table[abs_k - 1]);
+    td_real v(td_sin_table[abs_k - 1]);
+
+    if (k > 0) {
+      ss = u * sin_t + v * cos_t;
+      cc = u * cos_t - v * sin_t;
+    } else {
+      ss = u * sin_t - v * cos_t;
+      cc = u * cos_t + v * sin_t;
+    }
+  }
+
+  if (abs_j == 0) {
+    s = ss;
+    c = cc;
+  } else if (j == 1) {
+    s = cc;
+    c = -ss;
+  } else if (j == -1) {
+    s = -cc;
+    c = ss;
+  } else {
+    s = -ss;
+    c = -cc;
+  }
 }
 
 td_real asin(const td_real &a) {
-  return from_qd_truncate(asin(to_qd_fallback(a)));
+  td_real abs_a = abs(a);
+
+  if (a.isnan()) {
+    return td_real::_nan;
+  }
+  if (abs_a > 1.0) {
+    td_real::error("(td_real::asin): Argument out of domain.");
+    return td_real::_nan;
+  }
+  if (abs_a.is_one()) {
+    return a.is_positive() ? td_real::_pi2 : -td_real::_pi2;
+  }
+
+  return atan2(a, sqrt(1.0 - sqr(a)));
 }
 
 td_real acos(const td_real &a) {
-  return from_qd_truncate(acos(to_qd_fallback(a)));
+  td_real abs_a = abs(a);
+
+  if (a.isnan()) {
+    return td_real::_nan;
+  }
+  if (abs_a > 1.0) {
+    td_real::error("(td_real::acos): Argument out of domain.");
+    return td_real::_nan;
+  }
+  if (abs_a.is_one()) {
+    return a.is_positive() ? td_real(0.0) : td_real::_pi;
+  }
+
+  return atan2(sqrt(1.0 - sqr(a)), a);
 }
 
 td_real atan(const td_real &a) {
-  return from_qd_truncate(atan(to_qd_fallback(a)));
+  return atan2(a, td_real(1.0));
 }
 
 td_real atan2(const td_real &y, const td_real &x) {
-  return from_qd_truncate(atan2(to_qd_fallback(y), to_qd_fallback(x)));
+  if (x.isnan() || y.isnan()) {
+    return td_real::_nan;
+  }
+
+  if (x.is_zero()) {
+    if (y.is_zero()) {
+      td_real::error("(td_real::atan2): Both arguments zero.");
+      return td_real::_nan;
+    }
+
+    return std::signbit(y[0]) ? -td_real::_pi2 : td_real::_pi2;
+  }
+
+  if (y.is_zero()) {
+    if (x.is_positive()) {
+      return signed_zero(y[0]);
+    }
+    return std::signbit(y[0]) ? -td_real::_pi : td_real::_pi;
+  }
+
+  if (x == y) {
+    return y.is_positive() ? td_real::_pi4 : -td_real::_3pi4;
+  }
+  if (x == -y) {
+    return y.is_positive() ? td_real::_3pi4 : -td_real::_pi4;
+  }
+
+  td_real r = sqrt(sqr(x) + sqr(y));
+  td_real xx = x / r;
+  td_real yy = y / r;
+  td_real z(std::atan2(to_double(y), to_double(x)));
+  td_real sin_z;
+  td_real cos_z;
+
+  if (std::abs(xx[0]) > std::abs(yy[0])) {
+    for (int i = 0; i < 3; i++) {
+      sincos(z, sin_z, cos_z);
+      z += (yy - sin_z) / cos_z;
+    }
+  } else {
+    for (int i = 0; i < 3; i++) {
+      sincos(z, sin_z, cos_z);
+      z -= (xx - cos_z) / sin_z;
+    }
+  }
+
+  return z;
 }
 
 td_real sinh(const td_real &a) {
-  return from_qd_truncate(sinh(to_qd_fallback(a)));
+  if (a.isnan()) {
+    return td_real::_nan;
+  }
+  if (a.is_zero()) {
+    return signed_zero(a[0]);
+  }
+  if (a.isinf()) {
+    return a;
+  }
+
+  if (abs(a) > 0.05) {
+    td_real ea = exp(a);
+    return mul_pwr2(ea - (1.0 / ea), 0.5);
+  }
+
+  td_real s = a;
+  td_real t = a;
+  td_real r = sqr(a);
+  double m = 1.0;
+  td_real thresh = abs(a) * td_real(td_real::_eps);
+
+  do {
+    m += 2.0;
+    t *= r;
+    t /= (m - 1.0) * m;
+    s += t;
+  } while (abs(t) > thresh);
+
+  return s;
 }
 
 td_real cosh(const td_real &a) {
-  return from_qd_truncate(cosh(to_qd_fallback(a)));
+  if (a.isnan()) {
+    return td_real::_nan;
+  }
+  if (a.is_zero()) {
+    return 1.0;
+  }
+  if (a.isinf()) {
+    return td_real::_inf;
+  }
+
+  td_real ea = exp(a);
+  return mul_pwr2(ea + (1.0 / ea), 0.5);
 }
 
 td_real tanh(const td_real &a) {
-  return from_qd_truncate(tanh(to_qd_fallback(a)));
+  if (a.isnan()) {
+    return td_real::_nan;
+  }
+  if (a.is_zero()) {
+    return signed_zero(a[0]);
+  }
+  if (a.isinf()) {
+    return a.is_positive() ? td_real(1.0) : td_real(-1.0);
+  }
+
+  if (abs(a) > 0.05) {
+    td_real ea = exp(a);
+    td_real inv_ea = 1.0 / ea;
+    return (ea - inv_ea) / (ea + inv_ea);
+  }
+
+  td_real s = sinh(a);
+  td_real c = sqrt(1.0 + sqr(s));
+  return s / c;
 }
 
 void sincosh(const td_real &a, td_real &s, td_real &c) {
-  qd_real qs;
-  qd_real qc;
-  sincosh(to_qd_fallback(a), qs, qc);
-  s = from_qd_truncate(qs);
-  c = from_qd_truncate(qc);
+  if (std::abs(to_double(a)) <= 0.05) {
+    s = sinh(a);
+    c = sqrt(1.0 + sqr(s));
+  } else {
+    td_real ea = exp(a);
+    td_real inv_ea = 1.0 / ea;
+    s = mul_pwr2(ea - inv_ea, 0.5);
+    c = mul_pwr2(ea + inv_ea, 0.5);
+  }
 }
 
 td_real asinh(const td_real &a) {
-  return from_qd_truncate(asinh(to_qd_fallback(a)));
+  if (a.isnan()) {
+    return td_real::_nan;
+  }
+  if (a.isinf()) {
+    return a;
+  }
+  return log(a + sqrt(sqr(a) + 1.0));
 }
 
 td_real acosh(const td_real &a) {
-  return from_qd_truncate(acosh(to_qd_fallback(a)));
+  if (a.isnan()) {
+    return td_real::_nan;
+  }
+  if (a < 1.0) {
+    td_real::error("(td_real::acosh): Argument out of domain.");
+    return td_real::_nan;
+  }
+  if (a.isinf()) {
+    return td_real::_inf;
+  }
+  return log(a + sqrt(sqr(a) - 1.0));
 }
 
 td_real atanh(const td_real &a) {
-  return from_qd_truncate(atanh(to_qd_fallback(a)));
+  if (a.isnan()) {
+    return td_real::_nan;
+  }
+  if (abs(a) >= 1.0) {
+    td_real::error("(td_real::atanh): Argument out of domain.");
+    return td_real::_nan;
+  }
+  return mul_pwr2(log((1.0 + a) / (1.0 - a)), 0.5);
 }
 
 ostream &operator<<(ostream &os, const td_real &td) {

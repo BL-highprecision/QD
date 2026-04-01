@@ -109,6 +109,8 @@ public:
   bool test9();
   bool test10();
   bool test11();
+  bool test12();
+  bool test13();
   bool testall();
 };
 
@@ -384,9 +386,9 @@ bool TdTestSuite::test11() {
   td_real inf_value("inf");
   td_real neg_inf("-inf");
   td_real neg_one("-1.0");
-  qd_suppress_error_messages = true;
+  td_suppress_error_messages = true;
   td_real log_nan = log(neg_one);
-  qd_suppress_error_messages = false;
+  td_suppress_error_messages = false;
 
   td_real a("12345.678901234567890123456789");
   std::ostringstream sci;
@@ -417,6 +419,95 @@ bool TdTestSuite::test11() {
   return pass;
 }
 
+bool TdTestSuite::test12() {
+  cout << endl;
+  cout << "Test 12.  (Deterministic transcendental spot and edge cases)." << endl;
+
+  td_real pos_zero(0.0);
+  td_real neg_zero(-0.0);
+  td_real near_one("0.999999999999999999999999999999999999999999");
+  td_real near_mone("-0.999999999999999999999999999999999999999999");
+  td_real near_pi2 = td_real::_pi2 - td_real("1e-20");
+  td_real large_angle("123456.125");
+  td_real x("0.125");
+  td_real y("-0.75");
+  td_real s;
+  td_real c;
+  td_real sh;
+  td_real ch;
+
+  sincos(near_pi2, s, c);
+  sincosh(x, sh, ch);
+
+  bool pass = true;
+  pass &= td_check_close(log10(td_real("1000.0")), qd_real(3.0), 64.0);
+  pass &= sin(pos_zero).is_zero() && !std::signbit(sin(pos_zero)[0]);
+  pass &= sin(neg_zero).is_zero() && std::signbit(sin(neg_zero)[0]);
+  pass &= cos(pos_zero).is_one();
+  pass &= td_check_close(s, sin(td_to_qd(near_pi2)), 96.0);
+  pass &= td_check_close(c, cos(td_to_qd(near_pi2)), 128.0);
+  pass &= td_check_close(tan(near_pi2) * c, td_to_qd(s), 128.0);
+  pass &= td_check_close(sin(large_angle), sin(td_to_qd(large_angle)), 768.0);
+  pass &= td_check_close(cos(large_angle), cos(td_to_qd(large_angle)), 768.0);
+  pass &= td_check_close(asin(near_one), asin(td_to_qd(near_one)), 128.0);
+  pass &= td_check_close(acos(near_mone), acos(td_to_qd(near_mone)), 128.0);
+  pass &= td_check_close(atan2(y, x), atan2(td_to_qd(y), td_to_qd(x)), 96.0);
+  pass &= td_check_close(sh, sinh(td_to_qd(x)), 64.0);
+  pass &= td_check_close(ch, cosh(td_to_qd(x)), 64.0);
+  pass &= td_check_close(tanh(y), tanh(td_to_qd(y)), 64.0);
+  pass &= td_check_close(asinh(y), asinh(td_to_qd(y)), 96.0);
+  pass &= td_check_close(acosh(td_real("1.5")), acosh(qd_real("1.5")), 128.0);
+  pass &= td_check_close(atanh(td_real("0.125")), atanh(qd_real("0.125")), 96.0);
+
+  if (flag_verbose) {
+    cout << "sin(pi/2 - 1e-20) = " << s << endl;
+    cout << "cos(pi/2 - 1e-20) = " << c << endl;
+    cout << "sin(large)        = " << sin(large_angle) << endl;
+    cout << "atan2(y, x)       = " << atan2(y, x) << endl;
+  }
+
+  return pass;
+}
+
+bool TdTestSuite::test13() {
+  cout << endl;
+  cout << "Test 13.  (Randomized native transcendental regression checks)." << endl;
+
+  bool pass = true;
+  std::srand(24680);
+
+  for (int i = 0; i < 48; i++) {
+    double u = (std::rand() / static_cast<double>(RAND_MAX)) * 10.0 - 5.0;
+    double v = (std::rand() / static_cast<double>(RAND_MAX)) * 10.0 - 5.0;
+    double w = (std::rand() / static_cast<double>(RAND_MAX)) * 0.98 - 0.49;
+
+    td_real x = td_real(u) + td_real(v) * td_real("1e-15");
+    td_real positive = abs(x) + td_real("0.125");
+    td_real unit = td_real(w) + td_real("1e-16");
+    td_real angle = x * td_real::_pi4;
+    td_real sx;
+    td_real cx;
+
+    sincos(angle, sx, cx);
+
+    pass &= td_check_close(exp(x), exp(td_to_qd(x)), 64.0);
+    pass &= td_check_close(log(positive), log(td_to_qd(positive)), 64.0);
+    pass &= td_check_close(log10(positive), log10(td_to_qd(positive)), 96.0);
+    pass &= td_check_close(sx, sin(td_to_qd(angle)), 96.0);
+    pass &= td_check_close(cx, cos(td_to_qd(angle)), 96.0);
+    pass &= td_check_close(tan(unit), tan(td_to_qd(unit)), 128.0);
+    pass &= td_check_close(atan(x), atan(td_to_qd(x)), 64.0);
+    pass &= td_check_close(atan2(x, positive), atan2(td_to_qd(x), td_to_qd(positive)), 96.0);
+    pass &= td_check_close(asin(unit), asin(td_to_qd(unit)), 128.0);
+    pass &= td_check_close(acos(unit), acos(td_to_qd(unit)), 128.0);
+    pass &= td_check_close(sinh(unit), sinh(td_to_qd(unit)), 64.0);
+    pass &= td_check_close(cosh(unit), cosh(td_to_qd(unit)), 64.0);
+    pass &= td_check_close(tanh(unit), tanh(td_to_qd(unit)), 64.0);
+  }
+
+  return pass;
+}
+
 bool TdTestSuite::testall() {
   bool pass = true;
   pass &= print_result(test1());
@@ -430,6 +521,8 @@ bool TdTestSuite::testall() {
   pass &= print_result(test9());
   pass &= print_result(test10());
   pass &= print_result(test11());
+  pass &= print_result(test12());
+  pass &= print_result(test13());
   return pass;
 }
 

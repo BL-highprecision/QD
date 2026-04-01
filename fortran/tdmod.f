@@ -3,8 +3,8 @@
 !  Fortran-90 module file to use with triple-double numbers.
 
 module tdmodule
-  use ddmodule, only: dd_real
-  use qdmodule, only: qd_real
+  use ddmodule, only: dd_real, dd_complex
+  use qdmodule, only: qd_real, qd_complex
   use tdext
   implicit none
 
@@ -50,6 +50,10 @@ module tdmodule
     module procedure assign_d_tdc
     module procedure assign_tdc_dc
     module procedure assign_dc_tdc
+    module procedure assign_tdc_ddc
+    module procedure assign_ddc_tdc
+    module procedure assign_tdc_qdc
+    module procedure assign_qdc_tdc
   end interface
 
   interface operator (+)
@@ -125,8 +129,16 @@ module tdmodule
     module procedure to_dd_td
   end interface
 
+  interface ddcomplex
+    module procedure to_ddc_tdc
+  end interface
+
   interface qdreal
     module procedure to_qd_td
+  end interface
+
+  interface qdcomplex
+    module procedure to_qdc_tdc
   end interface
 
   interface real
@@ -144,6 +156,8 @@ module tdmodule
     module procedure to_tdc_td2
     module procedure to_tdc_d
     module procedure to_tdc_dc
+    module procedure to_tdc_ddc
+    module procedure to_tdc_qdc
   end interface
 
   interface cmplx
@@ -531,6 +545,38 @@ contains
     dc = cmplx(tdc%cmp(1), tdc%cmp(4), kind(0.d0))
   end subroutine assign_dc_tdc
 
+  elemental subroutine assign_tdc_ddc(tdc, ddc)
+    type (td_complex), intent(inout) :: tdc
+    type (dd_complex), intent(in) :: ddc
+    tdc%cmp(1:2) = ddc%cmp(1:2)
+    tdc%cmp(3) = 0.d0
+    tdc%cmp(4:5) = ddc%cmp(3:4)
+    tdc%cmp(6) = 0.d0
+  end subroutine assign_tdc_ddc
+
+  elemental subroutine assign_ddc_tdc(ddc, tdc)
+    type (dd_complex), intent(inout) :: ddc
+    type (td_complex), intent(in) :: tdc
+    ddc%cmp(1:2) = tdc%cmp(1:2)
+    ddc%cmp(3:4) = tdc%cmp(4:5)
+  end subroutine assign_ddc_tdc
+
+  elemental subroutine assign_tdc_qdc(tdc, qdc)
+    type (td_complex), intent(inout) :: tdc
+    type (qd_complex), intent(in) :: qdc
+    tdc%cmp(1:3) = qdc%cmp(1:3)
+    tdc%cmp(4:6) = qdc%cmp(5:7)
+  end subroutine assign_tdc_qdc
+
+  elemental subroutine assign_qdc_tdc(qdc, tdc)
+    type (qd_complex), intent(inout) :: qdc
+    type (td_complex), intent(in) :: tdc
+    qdc%cmp(1:3) = tdc%cmp(1:3)
+    qdc%cmp(4) = 0.d0
+    qdc%cmp(5:7) = tdc%cmp(4:6)
+    qdc%cmp(8) = 0.d0
+  end subroutine assign_qdc_tdc
+
   elemental type (td_real) function to_td_i(ia)
     integer, intent(in) :: ia
     to_td_i%re(1) = ia
@@ -577,6 +623,20 @@ contains
     to_qd_td%re(4) = 0.d0
   end function to_qd_td
 
+  elemental type (dd_complex) function to_ddc_tdc(tdc)
+    type (td_complex), intent(in) :: tdc
+    to_ddc_tdc%cmp(1:2) = tdc%cmp(1:2)
+    to_ddc_tdc%cmp(3:4) = tdc%cmp(4:5)
+  end function to_ddc_tdc
+
+  elemental type (qd_complex) function to_qdc_tdc(tdc)
+    type (td_complex), intent(in) :: tdc
+    to_qdc_tdc%cmp(1:3) = tdc%cmp(1:3)
+    to_qdc_tdc%cmp(4) = 0.d0
+    to_qdc_tdc%cmp(5:7) = tdc%cmp(4:6)
+    to_qdc_tdc%cmp(8) = 0.d0
+  end function to_qdc_tdc
+
   elemental real*8 function to_d_td(a)
     type (td_real), intent(in) :: a
     to_d_td = a%re(1)
@@ -617,6 +677,20 @@ contains
     to_tdc_dc%cmp(4) = aimag(dc)
     to_tdc_dc%cmp(5:6) = 0.d0
   end function to_tdc_dc
+
+  elemental type (td_complex) function to_tdc_ddc(ddc)
+    type (dd_complex), intent(in) :: ddc
+    to_tdc_ddc%cmp(1:2) = ddc%cmp(1:2)
+    to_tdc_ddc%cmp(3) = 0.d0
+    to_tdc_ddc%cmp(4:5) = ddc%cmp(3:4)
+    to_tdc_ddc%cmp(6) = 0.d0
+  end function to_tdc_ddc
+
+  elemental type (td_complex) function to_tdc_qdc(qdc)
+    type (qd_complex), intent(in) :: qdc
+    to_tdc_qdc%cmp(1:3) = qdc%cmp(1:3)
+    to_tdc_qdc%cmp(4:6) = qdc%cmp(5:7)
+  end function to_tdc_qdc
 
   elemental real*8 function to_d_tdc(tdc)
     type (td_complex), intent(in) :: tdc

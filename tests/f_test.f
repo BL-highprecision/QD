@@ -8,7 +8,9 @@ subroutine f_main
   implicit none
   integer*4 old_cw
   integer i
+  type (dd_complex) ddcx
   type (dd_real) ddx
+  type (qd_complex) qdcx
   type (td_complex) tcx, tcy, tcz
   type (td_real) tx, ty
   type (qd_real) x, y, z
@@ -70,6 +72,25 @@ subroutine f_main
   tcx = dc
   if (real(tcx) /= tdreal(1.0d0)) stop 26
   if (aimag(tcx) /= tdreal(-2.0d0)) stop 27
+
+  tcx = tdcomplex(tdreal("1.0d0") + td_eps, tdreal("-2.0d0") + tdreal("3.0d-32"))
+  ddcx = tcx
+  tcy = ddcx
+  if (abs(real(tcy) - tdreal(ddreal(real(tcx)))) > tdreal("1.0d-40")) stop 28
+  if (abs(aimag(tcy) - tdreal(ddreal(aimag(tcx)))) > tdreal("1.0d-40")) stop 29
+  ddcx = ddcomplex(tcx)
+  tcy = tdcomplex(ddcx)
+  if (abs(real(tcy) - tdreal(ddreal(real(tcx)))) > tdreal("1.0d-40")) stop 30
+  if (abs(aimag(tcy) - tdreal(ddreal(aimag(tcx)))) > tdreal("1.0d-40")) stop 31
+
+  qdcx = tcx
+  tcz = qdcx
+  if (abs(real(tcz) - real(tcx)) > tdreal("1.0d-40")) stop 32
+  if (abs(aimag(tcz) - aimag(tcx)) > tdreal("1.0d-40")) stop 33
+  qdcx = qdcomplex(tcx)
+  tcz = tdcomplex(qdcx)
+  if (abs(real(tcz) - real(tcx)) > tdreal("1.0d-40")) stop 34
+  if (abs(aimag(tcz) - aimag(tcx)) > tdreal("1.0d-40")) stop 35
 
   call f_fpu_fix_end (old_cw)
 end

@@ -185,6 +185,7 @@ QD_API td_real operator/(const td_real &a, const td_real &b);
 
 QD_API td_real sqr(const td_real &a);
 QD_API td_real sqrt(const td_real &a);
+QD_API td_real nroot(const td_real &a, int n);
 QD_API td_real npwr(const td_real &a, int n);
 QD_API td_real pow(const td_real &a, int n);
 QD_API td_real pow(const td_real &a, const td_real &b);
@@ -260,6 +261,7 @@ QD_API void sincosh(const td_real &a, td_real &s, td_real &c);
 QD_API td_real asinh(const td_real &a);
 QD_API td_real acosh(const td_real &a);
 QD_API td_real atanh(const td_real &a);
+QD_API td_real nint(const td_real &a);
 
 QD_API std::ostream &operator<<(std::ostream &s, const td_real &a);
 QD_API std::istream &operator>>(std::istream &s, td_real &a);

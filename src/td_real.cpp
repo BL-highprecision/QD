@@ -823,6 +823,48 @@ td_real td_real::sqrt(double d) {
   return ::sqrt(td_real(d));
 }
 
+td_real nroot(const td_real &a, int n) {
+  /* Strategy: use Newton iteration to solve
+
+        1 / (x^n) - a = 0
+
+     for x = a^(-1/n), then return 1 / x.
+  */
+  if (n <= 0) {
+    td_real::error("(td_real::nroot): N must be positive.");
+    return td_real::_nan;
+  }
+
+  if (n % 2 == 0 && a.is_negative()) {
+    td_real::error("(td_real::nroot): Negative argument.");
+    return td_real::_nan;
+  }
+
+  if (n == 1) {
+    return a;
+  }
+  if (n == 2) {
+    return sqrt(a);
+  }
+  if (a.is_zero()) {
+    return td_real(0.0);
+  }
+
+  td_real r = abs(a);
+  td_real x = std::exp(-std::log(r[0]) / n);
+  double dbl_n = static_cast<double>(n);
+
+  x += x * (1.0 - r * npwr(x, n)) / dbl_n;
+  x += x * (1.0 - r * npwr(x, n)) / dbl_n;
+  x += x * (1.0 - r * npwr(x, n)) / dbl_n;
+
+  if (a[0] < 0.0) {
+    x = -x;
+  }
+
+  return 1.0 / x;
+}
+
 td_real npwr(const td_real &a, int n) {
   if (n == 0) {
     if (a.is_zero()) {
@@ -1381,6 +1423,10 @@ td_real atanh(const td_real &a) {
     return td_real::_nan;
   }
   return mul_pwr2(log((1.0 + a) / (1.0 - a)), 0.5);
+}
+
+td_real nint(const td_real &a) {
+  return td_nint(a);
 }
 
 ostream &operator<<(ostream &os, const td_real &td) {

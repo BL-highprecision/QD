@@ -560,6 +560,16 @@ td_real &td_real::operator+=(double a) {
   return *this;
 }
 
+td_real &td_real::operator+=(const dd_real &a) {
+  *this = *this + a;
+  return *this;
+}
+
+td_real &td_real::operator+=(const qd_real &a) {
+  *this = *this + a;
+  return *this;
+}
+
 td_real &td_real::operator+=(const td_real &a) {
   *this = *this + a;
   return *this;
@@ -611,6 +621,16 @@ td_real operator-(const td_real &a, const td_real &b) {
 }
 
 td_real &td_real::operator-=(double a) {
+  *this = *this - a;
+  return *this;
+}
+
+td_real &td_real::operator-=(const dd_real &a) {
+  *this = *this - a;
+  return *this;
+}
+
+td_real &td_real::operator-=(const qd_real &a) {
   *this = *this - a;
   return *this;
 }
@@ -702,6 +722,16 @@ td_real &td_real::operator*=(double a) {
   return *this;
 }
 
+td_real &td_real::operator*=(const dd_real &a) {
+  *this = *this * a;
+  return *this;
+}
+
+td_real &td_real::operator*=(const qd_real &a) {
+  *this = *this * a;
+  return *this;
+}
+
 td_real &td_real::operator*=(const td_real &a) {
   *this = *this * a;
   return *this;
@@ -782,9 +812,91 @@ td_real &td_real::operator/=(double a) {
   return *this;
 }
 
+td_real &td_real::operator/=(const dd_real &a) {
+  *this = *this / a;
+  return *this;
+}
+
+td_real &td_real::operator/=(const qd_real &a) {
+  *this = *this / a;
+  return *this;
+}
+
 td_real &td_real::operator/=(const td_real &a) {
   *this = *this / a;
   return *this;
+}
+
+dd_real &dd_real::operator+=(const td_real &a) {
+  *this += to_dd_real(a);
+  return *this;
+}
+
+dd_real &dd_real::operator-=(const td_real &a) {
+  *this -= to_dd_real(a);
+  return *this;
+}
+
+dd_real &dd_real::operator*=(const td_real &a) {
+  *this *= to_dd_real(a);
+  return *this;
+}
+
+dd_real &dd_real::operator/=(const td_real &a) {
+  *this /= to_dd_real(a);
+  return *this;
+}
+
+qd_real &qd_real::operator+=(const td_real &a) {
+  *this += to_qd_real(a);
+  return *this;
+}
+
+qd_real &qd_real::operator-=(const td_real &a) {
+  *this -= to_qd_real(a);
+  return *this;
+}
+
+qd_real &qd_real::operator*=(const td_real &a) {
+  *this *= to_qd_real(a);
+  return *this;
+}
+
+qd_real &qd_real::operator/=(const td_real &a) {
+  *this /= to_qd_real(a);
+  return *this;
+}
+
+qd_real operator+(const td_real &a, const qd_real &b) {
+  return to_qd_real(a) + b;
+}
+
+qd_real operator+(const qd_real &a, const td_real &b) {
+  return a + to_qd_real(b);
+}
+
+qd_real operator-(const td_real &a, const qd_real &b) {
+  return to_qd_real(a) - b;
+}
+
+qd_real operator-(const qd_real &a, const td_real &b) {
+  return a - to_qd_real(b);
+}
+
+qd_real operator*(const td_real &a, const qd_real &b) {
+  return to_qd_real(a) * b;
+}
+
+qd_real operator*(const qd_real &a, const td_real &b) {
+  return a * to_qd_real(b);
+}
+
+qd_real operator/(const td_real &a, const qd_real &b) {
+  return to_qd_real(a) / b;
+}
+
+qd_real operator/(const qd_real &a, const td_real &b) {
+  return a / to_qd_real(b);
 }
 
 td_real td_real::operator^(int n) const {
@@ -942,6 +1054,14 @@ bool operator==(const td_real &a, const td_real &b) {
   return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];
 }
 
+bool operator==(const td_real &a, const qd_real &b) {
+  return to_qd_real(a) == b;
+}
+
+bool operator==(const qd_real &a, const td_real &b) {
+  return a == to_qd_real(b);
+}
+
 bool operator!=(const td_real &a, double b) {
   return !(a == b);
 }
@@ -959,6 +1079,14 @@ bool operator!=(const dd_real &a, const td_real &b) {
 }
 
 bool operator!=(const td_real &a, const td_real &b) {
+  return !(a == b);
+}
+
+bool operator!=(const td_real &a, const qd_real &b) {
+  return !(a == b);
+}
+
+bool operator!=(const qd_real &a, const td_real &b) {
   return !(a == b);
 }
 
@@ -988,6 +1116,14 @@ bool operator<(const td_real &a, const td_real &b) {
   return a[2] < b[2];
 }
 
+bool operator<(const td_real &a, const qd_real &b) {
+  return to_qd_real(a) < b;
+}
+
+bool operator<(const qd_real &a, const td_real &b) {
+  return a < to_qd_real(b);
+}
+
 bool operator>(const td_real &a, double b) {
   return td_real(b) < a;
 }
@@ -1005,6 +1141,14 @@ bool operator>(const dd_real &a, const td_real &b) {
 }
 
 bool operator>(const td_real &a, const td_real &b) {
+  return b < a;
+}
+
+bool operator>(const td_real &a, const qd_real &b) {
+  return b < a;
+}
+
+bool operator>(const qd_real &a, const td_real &b) {
   return b < a;
 }
 
@@ -1028,6 +1172,14 @@ bool operator<=(const td_real &a, const td_real &b) {
   return !(a > b);
 }
 
+bool operator<=(const td_real &a, const qd_real &b) {
+  return !(a > b);
+}
+
+bool operator<=(const qd_real &a, const td_real &b) {
+  return !(a > b);
+}
+
 bool operator>=(const td_real &a, double b) {
   return !(a < b);
 }
@@ -1045,6 +1197,14 @@ bool operator>=(const dd_real &a, const td_real &b) {
 }
 
 bool operator>=(const td_real &a, const td_real &b) {
+  return !(a < b);
+}
+
+bool operator>=(const td_real &a, const qd_real &b) {
+  return !(a < b);
+}
+
+bool operator>=(const qd_real &a, const td_real &b) {
   return !(a < b);
 }
 

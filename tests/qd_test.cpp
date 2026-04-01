@@ -356,18 +356,46 @@ bool TdTestSuite::test10() {
   td_real mix_add = td + dd;
   td_real mix_mul = dd * td;
   td_real mix_div = td / dd;
+  qd_real qd_add = qd + td;
+  qd_real qd_sub = td - qd;
+  qd_real qd_mul = qd * td;
+  qd_real qd_div = qd / (td + td_real("1.0"));
   td_real from_dd = to_td_real(dd);
   td_real from_qd = to_td_real(qd);
   dd_real dd_round = to_dd_real(from_dd);
   qd_real qd_round = to_qd_real(from_qd);
+  dd_real dd_self("1.25");
+  td_real td_self("1.25");
+  qd_real qd_self("1.25");
+  td_real td_half("0.5");
+  qd_real qd_half("0.5");
+  qd_real td_self_ref = qd_real(dd) + qd_real("0.75");
+  qd_real qd_self_ref("0.875");
 
   bool pass = true;
   pass &= td_check_close(mix_add, qd_real(dd) + td_to_qd(td), 64.0);
   pass &= td_check_close(mix_mul, qd_real(dd) * td_to_qd(td), 64.0);
   pass &= td_check_close(mix_div, td_to_qd(td) / qd_real(dd), 64.0);
+  pass &= to_double(abs(qd_add - (qd + td_to_qd(td)))) < 64.0 * td_real::_eps * td_scale(qd_add);
+  pass &= to_double(abs(qd_sub - (td_to_qd(td) - qd))) < 64.0 * td_real::_eps * td_scale(qd_sub);
+  pass &= to_double(abs(qd_mul - (qd * td_to_qd(td)))) < 64.0 * td_real::_eps * td_scale(qd_mul);
+  pass &= to_double(abs(qd_div - (qd / (td_to_qd(td) + qd_real(1.0))))) < 64.0 * td_real::_eps * td_scale(qd_div);
   pass &= abs(to_double(qd_real(dd_round) - qd_real(dd))) < 16.0 * dd_real::_eps;
   pass &= td_check_close(from_qd, qd, 32.0);
   pass &= to_double(abs(qd_round - qd)) < 64.0 * td_real::_eps * td_scale(qd);
+
+  dd_self += td_half;
+  dd_self *= td_half;
+  td_self += dd;
+  td_self -= qd_half;
+  qd_self += td_half;
+  qd_self *= td_half;
+
+  pass &= abs(to_double(qd_real(dd_self) - qd_real("0.875"))) < 32.0 * dd_real::_eps;
+  pass &= td_check_close(td_self, td_self_ref, 64.0);
+  pass &= to_double(abs(qd_self - qd_self_ref)) < 64.0 * td_real::_eps * td_scale(qd_self_ref);
+  pass &= (td < qd);
+  pass &= (qd > td);
 
   if (flag_verbose) {
     cout << "mix_add = " << mix_add << endl;

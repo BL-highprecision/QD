@@ -105,17 +105,25 @@ struct QD_API td_real {
   static td_real ieee_add(const td_real &a, const td_real &b);
 
   td_real &operator+=(double a);
+  td_real &operator+=(const dd_real &a);
+  td_real &operator+=(const qd_real &a);
   td_real &operator+=(const td_real &a);
 
   td_real &operator-=(double a);
+  td_real &operator-=(const dd_real &a);
+  td_real &operator-=(const qd_real &a);
   td_real &operator-=(const td_real &a);
 
   td_real operator-() const;
 
   td_real &operator*=(double a);
+  td_real &operator*=(const dd_real &a);
+  td_real &operator*=(const qd_real &a);
   td_real &operator*=(const td_real &a);
 
   td_real &operator/=(double a);
+  td_real &operator/=(const dd_real &a);
+  td_real &operator/=(const qd_real &a);
   td_real &operator/=(const td_real &a);
 
   td_real &operator=(double a);
@@ -163,24 +171,32 @@ QD_API td_real operator+(const td_real &a, double b);
 QD_API td_real operator+(double a, const td_real &b);
 QD_API td_real operator+(const td_real &a, const dd_real &b);
 QD_API td_real operator+(const dd_real &a, const td_real &b);
+QD_API qd_real operator+(const td_real &a, const qd_real &b);
+QD_API qd_real operator+(const qd_real &a, const td_real &b);
 QD_API td_real operator+(const td_real &a, const td_real &b);
 
 QD_API td_real operator-(const td_real &a, double b);
 QD_API td_real operator-(double a, const td_real &b);
 QD_API td_real operator-(const td_real &a, const dd_real &b);
 QD_API td_real operator-(const dd_real &a, const td_real &b);
+QD_API qd_real operator-(const td_real &a, const qd_real &b);
+QD_API qd_real operator-(const qd_real &a, const td_real &b);
 QD_API td_real operator-(const td_real &a, const td_real &b);
 
 QD_API td_real operator*(const td_real &a, double b);
 QD_API td_real operator*(double a, const td_real &b);
 QD_API td_real operator*(const td_real &a, const dd_real &b);
 QD_API td_real operator*(const dd_real &a, const td_real &b);
+QD_API qd_real operator*(const td_real &a, const qd_real &b);
+QD_API qd_real operator*(const qd_real &a, const td_real &b);
 QD_API td_real operator*(const td_real &a, const td_real &b);
 
 QD_API td_real operator/(const td_real &a, double b);
 QD_API td_real operator/(double a, const td_real &b);
 QD_API td_real operator/(const td_real &a, const dd_real &b);
 QD_API td_real operator/(const dd_real &a, const td_real &b);
+QD_API qd_real operator/(const td_real &a, const qd_real &b);
+QD_API qd_real operator/(const qd_real &a, const td_real &b);
 QD_API td_real operator/(const td_real &a, const td_real &b);
 
 QD_API td_real sqr(const td_real &a);
@@ -200,36 +216,48 @@ QD_API bool operator==(const td_real &a, double b);
 QD_API bool operator==(double a, const td_real &b);
 QD_API bool operator==(const td_real &a, const dd_real &b);
 QD_API bool operator==(const dd_real &a, const td_real &b);
+QD_API bool operator==(const td_real &a, const qd_real &b);
+QD_API bool operator==(const qd_real &a, const td_real &b);
 QD_API bool operator==(const td_real &a, const td_real &b);
 
 QD_API bool operator!=(const td_real &a, double b);
 QD_API bool operator!=(double a, const td_real &b);
 QD_API bool operator!=(const td_real &a, const dd_real &b);
 QD_API bool operator!=(const dd_real &a, const td_real &b);
+QD_API bool operator!=(const td_real &a, const qd_real &b);
+QD_API bool operator!=(const qd_real &a, const td_real &b);
 QD_API bool operator!=(const td_real &a, const td_real &b);
 
 QD_API bool operator<(const td_real &a, double b);
 QD_API bool operator<(double a, const td_real &b);
 QD_API bool operator<(const td_real &a, const dd_real &b);
 QD_API bool operator<(const dd_real &a, const td_real &b);
+QD_API bool operator<(const td_real &a, const qd_real &b);
+QD_API bool operator<(const qd_real &a, const td_real &b);
 QD_API bool operator<(const td_real &a, const td_real &b);
 
 QD_API bool operator>(const td_real &a, double b);
 QD_API bool operator>(double a, const td_real &b);
 QD_API bool operator>(const td_real &a, const dd_real &b);
 QD_API bool operator>(const dd_real &a, const td_real &b);
+QD_API bool operator>(const td_real &a, const qd_real &b);
+QD_API bool operator>(const qd_real &a, const td_real &b);
 QD_API bool operator>(const td_real &a, const td_real &b);
 
 QD_API bool operator<=(const td_real &a, double b);
 QD_API bool operator<=(double a, const td_real &b);
 QD_API bool operator<=(const td_real &a, const dd_real &b);
 QD_API bool operator<=(const dd_real &a, const td_real &b);
+QD_API bool operator<=(const td_real &a, const qd_real &b);
+QD_API bool operator<=(const qd_real &a, const td_real &b);
 QD_API bool operator<=(const td_real &a, const td_real &b);
 
 QD_API bool operator>=(const td_real &a, double b);
 QD_API bool operator>=(double a, const td_real &b);
 QD_API bool operator>=(const td_real &a, const dd_real &b);
 QD_API bool operator>=(const dd_real &a, const td_real &b);
+QD_API bool operator>=(const td_real &a, const qd_real &b);
+QD_API bool operator>=(const qd_real &a, const td_real &b);
 QD_API bool operator>=(const td_real &a, const td_real &b);
 
 QD_API dd_real to_dd_real(const td_real &a);
@@ -265,6 +293,9 @@ QD_API td_real nint(const td_real &a);
 
 QD_API std::ostream &operator<<(std::ostream &s, const td_real &a);
 QD_API std::istream &operator>>(std::istream &s, td_real &a);
+#ifdef QD_INLINE
+#include <qd/td_inline.h>
+#endif
 
 QD_API extern bool td_suppress_error_messages;
 

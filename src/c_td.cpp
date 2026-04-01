@@ -29,6 +29,14 @@ void c_td_add_td_dd(const double *a, const double *b, double *c) {
   TO_DOUBLE_PTR(td_real(a) + dd_real(b), c);
 }
 
+void c_td_add_qd_td(const double *a, const double *b, double *c) {
+  TO_DOUBLE_PTR(to_td_real(qd_real(a)) + td_real(b), c);
+}
+
+void c_td_add_td_qd(const double *a, const double *b, double *c) {
+  TO_DOUBLE_PTR(td_real(a) + to_td_real(qd_real(b)), c);
+}
+
 void c_td_add_d_td(double a, const double *b, double *c) {
   TO_DOUBLE_PTR(a + td_real(b), c);
 }
@@ -49,6 +57,12 @@ void c_td_selfadd_dd(const double *a, double *b) {
   TO_DOUBLE_PTR(bb, b);
 }
 
+void c_td_selfadd_qd(const double *a, double *b) {
+  td_real bb(b);
+  bb += to_td_real(qd_real(a));
+  TO_DOUBLE_PTR(bb, b);
+}
+
 void c_td_selfadd_d(double a, double *b) {
   td_real bb(b);
   bb += a;
@@ -65,6 +79,14 @@ void c_td_sub_dd_td(const double *a, const double *b, double *c) {
 
 void c_td_sub_td_dd(const double *a, const double *b, double *c) {
   TO_DOUBLE_PTR(td_real(a) - dd_real(b), c);
+}
+
+void c_td_sub_qd_td(const double *a, const double *b, double *c) {
+  TO_DOUBLE_PTR(to_td_real(qd_real(a)) - td_real(b), c);
+}
+
+void c_td_sub_td_qd(const double *a, const double *b, double *c) {
+  TO_DOUBLE_PTR(td_real(a) - to_td_real(qd_real(b)), c);
 }
 
 void c_td_sub_d_td(double a, const double *b, double *c) {
@@ -87,6 +109,12 @@ void c_td_selfsub_dd(const double *a, double *b) {
   TO_DOUBLE_PTR(bb, b);
 }
 
+void c_td_selfsub_qd(const double *a, double *b) {
+  td_real bb(b);
+  bb -= to_td_real(qd_real(a));
+  TO_DOUBLE_PTR(bb, b);
+}
+
 void c_td_selfsub_d(double a, double *b) {
   td_real bb(b);
   bb -= a;
@@ -103,6 +131,14 @@ void c_td_mul_dd_td(const double *a, const double *b, double *c) {
 
 void c_td_mul_td_dd(const double *a, const double *b, double *c) {
   TO_DOUBLE_PTR(td_real(a) * dd_real(b), c);
+}
+
+void c_td_mul_qd_td(const double *a, const double *b, double *c) {
+  TO_DOUBLE_PTR(to_td_real(qd_real(a)) * td_real(b), c);
+}
+
+void c_td_mul_td_qd(const double *a, const double *b, double *c) {
+  TO_DOUBLE_PTR(td_real(a) * to_td_real(qd_real(b)), c);
 }
 
 void c_td_mul_d_td(double a, const double *b, double *c) {
@@ -125,6 +161,12 @@ void c_td_selfmul_dd(const double *a, double *b) {
   TO_DOUBLE_PTR(bb, b);
 }
 
+void c_td_selfmul_qd(const double *a, double *b) {
+  td_real bb(b);
+  bb *= to_td_real(qd_real(a));
+  TO_DOUBLE_PTR(bb, b);
+}
+
 void c_td_selfmul_d(double a, double *b) {
   td_real bb(b);
   bb *= a;
@@ -141,6 +183,14 @@ void c_td_div_dd_td(const double *a, const double *b, double *c) {
 
 void c_td_div_td_dd(const double *a, const double *b, double *c) {
   TO_DOUBLE_PTR(td_real(a) / dd_real(b), c);
+}
+
+void c_td_div_qd_td(const double *a, const double *b, double *c) {
+  TO_DOUBLE_PTR(to_td_real(qd_real(a)) / td_real(b), c);
+}
+
+void c_td_div_td_qd(const double *a, const double *b, double *c) {
+  TO_DOUBLE_PTR(td_real(a) / to_td_real(qd_real(b)), c);
 }
 
 void c_td_div_d_td(double a, const double *b, double *c) {
@@ -163,6 +213,12 @@ void c_td_selfdiv_dd(const double *a, double *b) {
   TO_DOUBLE_PTR(bb, b);
 }
 
+void c_td_selfdiv_qd(const double *a, double *b) {
+  td_real bb(b);
+  bb /= to_td_real(qd_real(a));
+  TO_DOUBLE_PTR(bb, b);
+}
+
 void c_td_selfdiv_d(double a, double *b) {
   td_real bb(b);
   bb /= a;
@@ -179,6 +235,10 @@ void c_td_copy_dd(const double *a, double *b) {
   b[0] = a[0];
   b[1] = a[1];
   b[2] = 0.0;
+}
+
+void c_td_copy_qd(const double *a, double *b) {
+  TO_DOUBLE_PTR(to_td_real(qd_real(a)), b);
 }
 
 void c_td_copy_d(double a, double *b) {
@@ -329,6 +389,30 @@ void c_td_comp_d_td(double a, const double *b, int *result) {
   if (a < bb) {
     *result = -1;
   } else if (a > bb) {
+    *result = 1;
+  } else {
+    *result = 0;
+  }
+}
+
+void c_td_comp_td_qd(const double *a, const double *b, int *result) {
+  td_real aa(a);
+  td_real bb = to_td_real(qd_real(b));
+  if (aa < bb) {
+    *result = -1;
+  } else if (aa > bb) {
+    *result = 1;
+  } else {
+    *result = 0;
+  }
+}
+
+void c_td_comp_qd_td(const double *a, const double *b, int *result) {
+  td_real aa = to_td_real(qd_real(a));
+  td_real bb(b);
+  if (aa < bb) {
+    *result = -1;
+  } else if (aa > bb) {
     *result = 1;
   } else {
     *result = 0;

@@ -17,7 +17,10 @@
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
+#include <sstream>
 #include <qd/qd_real.h>
+#include <qd/td_real.h>
+#include <qd/inline.h>
 #include <qd/fpu.h>
 
 using std::cout;
@@ -31,6 +34,7 @@ using std::exit;
 
 // Global flags passed to the main program.
 static bool flag_test_dd = false;
+static bool flag_test_td = false;
 static bool flag_test_qd = false;
 bool flag_verbose = false;
 
@@ -59,6 +63,212 @@ public:
 
 template <class T>
 const int TestSuite<T>::double_digits = 6;
+
+namespace {
+
+qd_real td_to_qd(const td_real &a) {
+  return qd_real(a[0]) + qd_real(a[1]) + qd_real(a[2]);
+}
+
+bool td_nonoverlap(double hi, double lo) {
+  if (hi == 0.0) {
+    return lo == 0.0;
+  }
+  return std::abs(lo) <= 0.5 * std::ldexp(std::abs(hi), -52);
+}
+
+bool td_is_normalized(const td_real &a) {
+  return std::abs(a[0]) >= std::abs(a[1]) &&
+         std::abs(a[1]) >= std::abs(a[2]) &&
+         td_nonoverlap(a[0], a[1]) &&
+         td_nonoverlap(a[1], a[2]);
+}
+
+double td_abs_error(const td_real &a, const qd_real &ref) {
+  return to_double(abs(td_to_qd(a) - ref));
+}
+
+double td_scale(const qd_real &ref) {
+  return std::max(1.0, std::abs(to_double(ref)));
+}
+
+bool td_check_close(const td_real &a, const qd_real &ref, double factor) {
+  return td_abs_error(a, ref) <= factor * td_real::_eps * td_scale(ref);
+}
+
+class TdTestSuite {
+public:
+  bool test1();
+  bool test2();
+  bool test3();
+  bool test4();
+  bool test5();
+  bool test6();
+  bool testall();
+};
+
+bool TdTestSuite::test1() {
+  cout << endl;
+  cout << "Test 1.  (Normalization invariants after arithmetic)." << endl;
+
+  td_real a("1.2345678901234567890123456789012345678901");
+  td_real b("9.8765432109876543210987654321098765432109e-40");
+  td_real c("-8.7654321098765432109876543210987654321098e20");
+
+  td_real sum = a + c;
+  td_real diff = a - b;
+  td_real prod = a * c;
+  td_real quot = c / a;
+  td_real root = sqrt(td_real("2.0"));
+
+  bool pass = td_is_normalized(sum) && td_is_normalized(diff) &&
+      td_is_normalized(prod) && td_is_normalized(quot) && td_is_normalized(root);
+
+  if (flag_verbose) {
+    cout << "sum  = " << sum << endl;
+    cout << "diff = " << diff << endl;
+    cout << "prod = " << prod << endl;
+    cout << "quot = " << quot << endl;
+    cout << "root = " << root << endl;
+  }
+
+  return pass;
+}
+
+bool TdTestSuite::test2() {
+  cout << endl;
+  cout << "Test 2.  (Cancellation-sensitive addition / subtraction)." << endl;
+
+  const char *sa = "1.0000000000000002220446049250313080847263336181640625";
+  const char *sb = "1.00000000000000011102230246251565404236316680908203125";
+  td_real a(sa);
+  td_real b(sb);
+  td_real diff = a - b;
+  td_real back = diff + b;
+  qd_real qdiff = qd_real(sa) - qd_real(sb);
+  qd_real qback = qdiff + qd_real(sb);
+
+  bool pass = td_check_close(diff, qdiff, 32.0) &&
+      td_check_close(back, qback, 32.0);
+
+  if (flag_verbose) {
+    cout << "diff = " << diff << endl;
+    cout << "back = " << back << endl;
+    cout << "diff err = " << td_abs_error(diff, qdiff) / td_real::_eps << " eps" << endl;
+    cout << "back err = " << td_abs_error(back, qback) / td_real::_eps << " eps" << endl;
+  }
+
+  return pass;
+}
+
+bool TdTestSuite::test3() {
+  cout << endl;
+  cout << "Test 3.  (Multiplication across mixed magnitudes)." << endl;
+
+  const char *sa = "1.2345678901234567890123456789012345678901e150";
+  const char *sb = "9.8765432109876543210987654321098765432109e-120";
+  td_real a(sa);
+  td_real b(sb);
+  td_real prod = a * b;
+  qd_real qprod = qd_real(sa) * qd_real(sb);
+
+  if (flag_verbose) {
+    cout << "prod = " << prod << endl;
+    cout << "err  = " << td_abs_error(prod, qprod) / td_real::_eps << " eps" << endl;
+  }
+
+  return td_check_close(prod, qprod, 64.0);
+}
+
+bool TdTestSuite::test4() {
+  cout << endl;
+  cout << "Test 4.  (Division sanity checks)." << endl;
+
+  const char *sa = "1.2345678901234567890123456789012345678901e120";
+  const char *sb = "9.8765432109876543210987654321098765432109e30";
+  td_real a(sa);
+  td_real b(sb);
+  td_real q = a / b;
+  td_real thirds = td_real("1.0") / td_real("3.0");
+  qd_real qq = qd_real(sa) / qd_real(sb);
+  qd_real qthirds = qd_real(1.0) / qd_real(3.0);
+
+  bool pass = td_check_close(q, qq, 64.0) &&
+      td_check_close(thirds, qthirds, 64.0) &&
+      td_check_close(q * b, qd_real(sa), 128.0);
+
+  if (flag_verbose) {
+    cout << "q      = " << q << endl;
+    cout << "thirds = " << thirds << endl;
+  }
+
+  return pass;
+}
+
+bool TdTestSuite::test5() {
+  cout << endl;
+  cout << "Test 5.  (sqrt on exact squares and values near 1)." << endl;
+
+  td_real square("15241578750190521");
+  td_real exact = sqrt(square);
+  td_real near_one("1.0000000000000000000000000000000000000000001");
+  td_real near_root = sqrt(near_one);
+  qd_real qexact("123456789");
+  qd_real qnear = sqrt(qd_real("1.0000000000000000000000000000000000000000001"));
+
+  bool pass = td_check_close(exact, qexact, 32.0) &&
+      td_check_close(near_root, qnear, 64.0);
+
+  if (flag_verbose) {
+    cout << "exact sqrt = " << exact << endl;
+    cout << "near sqrt  = " << near_root << endl;
+  }
+
+  return pass;
+}
+
+bool TdTestSuite::test6() {
+  cout << endl;
+  cout << "Test 6.  (Parse / format round trips)." << endl;
+
+  const char *samples[] = {
+    "3.1415926535897932384626433832795028841971693993751",
+    "-2.7182818284590452353602874713526624977572470937000e-120",
+    "9.9999999999999999999999999999999999999999999999999e200",
+    "1.2345678901234567890123456789012345678901234567890e-200"
+  };
+
+  bool pass = true;
+  for (int i = 0; i < 4; i++) {
+    td_real a(samples[i]);
+    std::ostringstream os;
+    os << std::setprecision(td_real::_ndigits) << std::scientific << a;
+    std::istringstream is(os.str());
+    td_real b;
+    is >> b;
+    pass &= td_check_close(b, td_to_qd(a), 64.0);
+
+    if (flag_verbose) {
+      cout << samples[i] << endl;
+      cout << " -> " << os.str() << endl;
+    }
+  }
+
+  return pass;
+}
+
+bool TdTestSuite::testall() {
+  bool pass = true;
+  pass &= print_result(test1());
+  pass &= print_result(test2());
+  pass &= print_result(test3());
+  pass &= print_result(test4());
+  pass &= print_result(test5());
+  pass &= print_result(test6());
+  return pass;
+}
+
+}  // namespace
 
 /* Test 1.   Polynomial Evaluation / Polynomial Solving */
 template <class T>
@@ -440,15 +650,15 @@ bool TestSuite<T>::testall() {
 }
 
 void print_usage() {
-  cout << "qd_test [-h] [-dd] [-qd] [-all]" << endl;
+  cout << "qd_test [-h] [-dd] [-td] [-qd] [-all]" << endl;
   cout << "  Performs miscellaneous tests of the quad-double library," << endl;
   cout << "  such as polynomial root finding, computation of pi, etc." << endl;
   cout << endl;
   cout << "  -h -help  Prints this usage message." << endl;
   cout << "  -dd       Perform tests with double-double types." << endl;
+  cout << "  -td       Perform tests with triple-double types." << endl;
   cout << "  -qd       Perform tests with quad-double types." << endl;
-  cout << "            This is the default." << endl;
-  cout << "  -all      Perform both double-double and quad-double tests." << endl;
+  cout << "  -all      Perform double-double, triple-double, and quad-double tests." << endl;
   cout << "  -v" << endl;
   cout << "  -verbose  Print detailed information for each test." << endl;
   
@@ -469,10 +679,12 @@ int main(int argc, char *argv[]) {
       exit(0);
     } else if (strcmp(arg, "-dd") == 0) {
       flag_test_dd = true;
+    } else if (strcmp(arg, "-td") == 0) {
+      flag_test_td = true;
     } else if (strcmp(arg, "-qd") == 0) {
       flag_test_qd = true;
     } else if (strcmp(arg, "-all") == 0) {
-      flag_test_dd = flag_test_qd = true;
+      flag_test_dd = flag_test_td = flag_test_qd = true;
     } else if (strcmp(arg, "-v") == 0 || strcmp(arg, "-verbose") == 0) {
       flag_verbose = true;
     } else {
@@ -481,8 +693,9 @@ int main(int argc, char *argv[]) {
   }
 
   /* If no flag, test both double-double and quad-double. */
-  if (!flag_test_dd && !flag_test_qd) {
+  if (!flag_test_dd && !flag_test_td && !flag_test_qd) {
     flag_test_dd = true;
+    flag_test_td = true;
     flag_test_qd = true;
   }
 
@@ -505,8 +718,17 @@ int main(int argc, char *argv[]) {
       cout << "sizeof(qd_real) = " << sizeof(qd_real) << endl;
     pass &= qd_test.testall();
   }
+
+  if (flag_test_td) {
+    TdTestSuite td_test;
+
+    cout << endl;
+    cout << "Testing td_real ..." << endl;
+    if (flag_verbose)
+      cout << "sizeof(td_real) = " << sizeof(td_real) << endl;
+    pass &= td_test.testall();
+  }
   
   fpu_fix_end(&old_cw);
   return (pass ? 0 : 1);
 }
-

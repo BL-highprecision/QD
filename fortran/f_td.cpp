@@ -9,8 +9,10 @@
 
 #include <cstring>
 #include <iostream>
+#include <cstdlib>
 
 #include <qd/td_real.h>
+#include <qd/inline.h>
 
 #define f_td_add          FC_FUNC_(f_td_add, F_TD_ADD)
 #define f_td_add_td_d     FC_FUNC_(f_td_add_td_d, F_TD_ADD_TD_D)
@@ -33,6 +35,9 @@
 #define f_td_npwr         FC_FUNC_(f_td_npwr, F_TD_NPWR)
 #define f_td_nroot        FC_FUNC_(f_td_nroot, F_TD_NROOT)
 #define f_td_nint         FC_FUNC_(f_td_nint, F_TD_NINT)
+#define f_td_aint         FC_FUNC_(f_td_aint, F_TD_AINT)
+#define f_td_floor        FC_FUNC_(f_td_floor, F_TD_FLOOR)
+#define f_td_ceil         FC_FUNC_(f_td_ceil, F_TD_CEIL)
 
 #define f_td_exp          FC_FUNC_(f_td_exp, F_TD_EXP)
 #define f_td_log          FC_FUNC_(f_td_log, F_TD_LOG)
@@ -60,6 +65,7 @@
 #define f_td_swrite       FC_FUNC_(f_td_swrite, F_TD_SWRITE)
 #define f_td_write        FC_FUNC_(f_td_write, F_TD_WRITE)
 #define f_td_neg          FC_FUNC_(f_td_neg, F_TD_NEG)
+#define f_td_rand         FC_FUNC_(f_td_rand, F_TD_RAND)
 #define f_td_comp         FC_FUNC_(f_td_comp, F_TD_COMP)
 #define f_td_comp_td_d    FC_FUNC_(f_td_comp_td_d, F_TD_COMP_TD_D)
 #define f_td_comp_d_td    FC_FUNC_(f_td_comp_d_td, F_TD_COMP_D_TD)
@@ -72,6 +78,54 @@
   ptr[2] = (a)[2];
 
 extern "C" {
+
+static td_real td_floor_local(const td_real &a) {
+  double x0 = std::floor(a[0]);
+  double x1 = 0.0;
+  double x2 = 0.0;
+
+  if (x0 == a[0]) {
+    x1 = std::floor(a[1]);
+    if (x1 == a[1]) {
+      x2 = std::floor(a[2]);
+    }
+    td::renorm(x0, x1, x2);
+  }
+
+  return td_real(x0, x1, x2);
+}
+
+static td_real td_ceil_local(const td_real &a) {
+  double x0 = std::ceil(a[0]);
+  double x1 = 0.0;
+  double x2 = 0.0;
+
+  if (x0 == a[0]) {
+    x1 = std::ceil(a[1]);
+    if (x1 == a[1]) {
+      x2 = std::ceil(a[2]);
+    }
+    td::renorm(x0, x1, x2);
+  }
+
+  return td_real(x0, x1, x2);
+}
+
+static td_real td_aint_local(const td_real &a) {
+  return (a[0] >= 0.0) ? td_floor_local(a) : td_ceil_local(a);
+}
+
+static td_real tdrand_local() {
+  static const double m_const = 4.6566128730773926e-10;
+  double m = m_const;
+  td_real r = 0.0;
+
+  for (int i = 0; i < 6; i++, m *= m_const) {
+    r += std::rand() * m;
+  }
+
+  return r;
+}
 
 void f_td_add(const double *a, const double *b, double *c) {
   TO_DOUBLE_PTR(td_real(a) + td_real(b), c);
@@ -135,6 +189,18 @@ void f_td_nroot(const double *a, const int *n, double *b) {
 
 void f_td_nint(const double *a, double *b) {
   TO_DOUBLE_PTR(nint(td_real(a)), b);
+}
+
+void f_td_aint(const double *a, double *b) {
+  TO_DOUBLE_PTR(td_aint_local(td_real(a)), b);
+}
+
+void f_td_floor(const double *a, double *b) {
+  TO_DOUBLE_PTR(td_floor_local(td_real(a)), b);
+}
+
+void f_td_ceil(const double *a, double *b) {
+  TO_DOUBLE_PTR(td_ceil_local(td_real(a)), b);
 }
 
 void f_td_exp(const double *a, double *b) {
@@ -241,6 +307,10 @@ void f_td_neg(const double *a, double *b) {
   b[0] = -a[0];
   b[1] = -a[1];
   b[2] = -a[2];
+}
+
+void f_td_rand(double *a) {
+  TO_DOUBLE_PTR(tdrand_local(), a);
 }
 
 void f_td_comp(const double *a, const double *b, int *result) {

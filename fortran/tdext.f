@@ -86,6 +86,21 @@ module tdext
       real*8, intent(out) :: b(3)
     end subroutine
 
+    pure subroutine f_td_aint(a, b)
+      real*8, intent(in) :: a(3)
+      real*8, intent(out) :: b(3)
+    end subroutine
+
+    pure subroutine f_td_floor(a, b)
+      real*8, intent(in) :: a(3)
+      real*8, intent(out) :: b(3)
+    end subroutine
+
+    pure subroutine f_td_ceil(a, b)
+      real*8, intent(in) :: a(3)
+      real*8, intent(out) :: b(3)
+    end subroutine
+
     pure subroutine f_td_log(a, b)
       real*8, intent(in) :: a(3)
       real*8, intent(out) :: b(3)
@@ -180,6 +195,10 @@ module tdext
       real*8, intent(in) :: a(3)
       integer, intent(in) :: prec, maxlen
       character, intent(out) :: str(maxlen)
+    end subroutine
+
+    subroutine f_td_rand(a)
+      real*8, intent(out) :: a(3)
     end subroutine
 
     pure subroutine f_td_comp(a, b, r)

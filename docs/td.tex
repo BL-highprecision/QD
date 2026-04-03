@@ -1,0 +1,687 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{xcolor}
+
+\geometry{margin=2.5cm}
+
+\lstset{
+  language=C++,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\bfseries\color{blue!70!black},
+  commentstyle=\itshape\color{green!50!black},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  frame=single,
+  breaklines=true,
+  columns=flexible
+}
+
+\newtheorem{definition}{Definition}
+\newtheorem{lemma}{Lemma}
+\newtheorem{theorem}{Theorem}
+\newtheorem{remark}{Remark}
+
+\title{%
+  Triple-Double Floating-Point Arithmetic: \\
+  Algorithms and Implementation in the QD Library%
+}
+\author{%
+  Nakata Maho \\
+  \textit{RIKEN} \\
+  \texttt{maho@riken.jp}%
+}
+\date{2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We describe the design and algorithmic details of \texttt{td\_real}, a
+triple-double floating-point type that extends the QD library
+(Hida--Li--Bailey) with approximately 159-bit ($\approx 47$ decimal
+digit) precision.  A triple-double number is represented as an
+unevaluated sum of three IEEE 754 double-precision values
+$a = x_0 + x_1 + x_2$, subject to the non-overlapping constraint
+$|x_{i+1}| \le \tfrac{1}{2}\,\mathrm{ulp}(x_i)$.  We present
+algorithms for renormalization, addition (both IEEE-style merge and
+Knuth--M{\o}ller chain), subtraction, multiplication, division with
+overflow-safe rescaling, square root via Newton iteration, and
+transcendental functions (exp, log, sin, cos, atan2, sinh, cosh,
+etc.).  C and Fortran 90 binding layers are also described.  The
+implementation is publicly available under a BSD 2-clause license.
+\end{abstract}
+
+\section{Introduction}
+
+Many applications in computational science require more than the
+$\approx 16$ decimal digits offered by IEEE 754 binary64
+(double-precision).  The double-double (DD, $\approx 106$-bit,
+$\approx 31$-digit) and quad-double (QD, $\approx 212$-bit,
+$\approx 63$-digit) types introduced by Hida, Li, and
+Bailey~\cite{HLB2001,QDlib} fill a useful niche between hardware
+double and arbitrary-precision libraries such as GMP/MPFR.  However,
+the factor-of-two jump in both precision and cost from DD to QD
+leaves a gap: problems that need 40--50 digits pay the full cost of
+QD's 63 digits.
+
+The \texttt{td\_real} type fills this gap.  It stores three
+non-overlapping doubles, yielding $\approx 159$ bits ($\approx 47$
+decimal digits) of significand.  The per-operation cost is roughly
+$50\text{--}60\%$ that of QD for the basic arithmetic operations,
+because multiplication generates $\binom{3}{2}\cdot 2 + 3 = 9$
+partial products instead of QD's 16, and renormalization sorts three
+components instead of four.
+
+This paper is organized as follows.  Section~\ref{sec:representation}
+defines the triple-double representation and its invariants.
+Section~\ref{sec:renorm} presents the renormalization algorithms.
+Sections~\ref{sec:add}--\ref{sec:div} describe the four basic
+arithmetic operations.  Section~\ref{sec:sqrt} covers square root.
+Section~\ref{sec:transcendental} describes the transcendental
+function implementations.  Section~\ref{sec:constants} lists the
+precomputed constants.  Section~\ref{sec:bindings} outlines the C
+and Fortran binding layers.  Section~\ref{sec:conclusion} concludes.
+
+
+\section{Representation and Invariants}
+\label{sec:representation}
+
+\begin{definition}[Triple-double number]
+A triple-double number $a$ is an unevaluated sum of three IEEE 754
+binary64 values:
+\begin{equation}
+  a = x_0 + x_1 + x_2, \quad |x_1| \le \tfrac{1}{2}\,\mathrm{ulp}(x_0),
+  \quad |x_2| \le \tfrac{1}{2}\,\mathrm{ulp}(x_1).
+  \label{eq:td-rep}
+\end{equation}
+The component $x_0$ carries the leading bits; $x_1$ and $x_2$ carry
+successively lower-order bits.  The struct layout is:
+\begin{lstlisting}
+struct td_real {
+  double x[3];  // x[0]: high, x[1]: mid, x[2]: low
+};
+\end{lstlisting}
+\end{definition}
+
+\begin{remark}[Precision]
+Each double carries 53 bits of significand.  In the ideal
+non-overlapping case, the triple-double significand spans
+$53 + 52 + 52 = 157$ bits, giving
+$\lfloor 157 \log_{10} 2 \rfloor = 47$ decimal digits.
+The machine epsilon is $\varepsilon_{\mathrm{td}} = 2^{-157}
+\approx 5.474 \times 10^{-48}$.
+\end{remark}
+
+\begin{remark}[Relationship to DD and QD]
+The DD type uses 2 doubles ($\approx 106$ bits); QD uses 4 doubles
+($\approx 212$ bits).  TD sits between them:
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+Type & Components & Bits & Decimal digits \\
+\midrule
+\texttt{dd\_real} & 2 & $\approx 106$ & 31 \\
+\texttt{td\_real} & 3 & $\approx 157$ & 47 \\
+\texttt{qd\_real} & 4 & $\approx 212$ & 63 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{remark}
+
+\subsection{Special values}
+
+The implementation represents $\pm\infty$ by setting all three
+components to $\pm\infty$, and NaN by setting all three components to
+NaN.  Membership tests use the macros \texttt{QD\_ISINF} and
+\texttt{QD\_ISNAN} on the leading component $x_0$, which suffices
+because the non-overlapping invariant guarantees $|x_1| \ll |x_0|$
+for finite values:
+\begin{lstlisting}
+bool isnan()    const { return QD_ISNAN(x[0]) || QD_ISNAN(x[1]) || QD_ISNAN(x[2]); }
+bool isfinite() const { return QD_ISFINITE(x[0]); }
+bool isinf()    const { return QD_ISINF(x[0]); }
+\end{lstlisting}
+
+
+\section{Renormalization}
+\label{sec:renorm}
+
+After each arithmetic operation the result typically consists of more
+than three double-precision components that may overlap.  The
+\emph{renormalization} step merges and sorts these components so that
+the non-overlapping invariant~\eqref{eq:td-rep} is restored.
+
+Three overloads are provided: for 3, 4, and 5 input components.
+
+\subsection{\texttt{renorm(c0, c1, c2)} --- 3-component}
+
+This is the simplest case.  The algorithm uses \textsc{QuickTwoSum}
+to propagate carries from high to low:
+\begin{algorithmic}[1]
+\If{$c_0 = \pm\infty$}
+  \Return
+\EndIf
+\State $(c_0, c_1) \gets \textsc{QuickTwoSum}(c_0, c_1)$
+\State $s_0 \gets c_0;\; s_1 \gets c_1$
+\If{$s_1 \ne 0$}
+  \State $(s_1, s_2) \gets \textsc{QuickTwoSum}(s_1, c_2)$
+\Else
+  \State $(s_0, s_1) \gets \textsc{QuickTwoSum}(s_0, c_2)$
+\EndIf
+\State $(c_0, c_1, c_2) \gets (s_0, s_1, s_2)$
+\end{algorithmic}
+
+\subsection{\texttt{renorm(c0, c1, c2, c3)} --- 4-component}
+
+This variant is needed after TD$+$double and TD$\times$double
+operations.  It first performs a bottom-up sweep of
+\textsc{QuickTwoSum} to collect carries, then a top-down sweep to
+compress into three non-overlapping components:
+\begin{algorithmic}[1]
+\State \textit{// Bottom-up sweep}
+\State $(s, c_3) \gets \textsc{QuickTwoSum}(c_2, c_3)$
+\State $(s, c_2) \gets \textsc{QuickTwoSum}(c_1, s)$
+\State $(c_0, c_1) \gets \textsc{QuickTwoSum}(c_0, s)$
+\State \textit{// Top-down compression with zero-skipping}
+\State $s_0 \gets c_0;\; s_1 \gets c_1$
+\If{$s_1 \ne 0$}
+  \State $(s_1, s_2) \gets \textsc{QuickTwoSum}(s_1, c_2)$
+  \State $s_2 \gets s_2 + c_3$ \Comment{absorb remainder}
+\Else
+  \State $(s_0, s_1) \gets \textsc{QuickTwoSum}(s_0, c_2)$
+  \State \textit{continue similarly with $c_3$}
+\EndIf
+\State $(c_0, c_1, c_2) \gets (s_0, s_1, s_2)$
+\end{algorithmic}
+
+\subsection{\texttt{renorm(c0, c1, c2, c3, c4)} --- 5-component}
+
+Required after TD$\times$TD multiplication, which produces five
+significant partial sums.  The structure is analogous: a 4-step
+bottom-up sweep followed by a top-down compression with
+zero-skipping at each level.  The final $c_3$ value (and beyond)
+is discarded, truncating to triple-double precision.
+
+
+\section{Addition}
+\label{sec:add}
+
+\subsection{TD $+$ double}
+
+Adding a scalar $b$ to a triple-double $a = (a_0, a_1, a_2)$ uses
+a simple carry-propagation chain of \textsc{TwoSum} operations:
+\begin{algorithmic}[1]
+\State $(c_0, e) \gets \textsc{TwoSum}(a_0, b)$
+\State $(c_1, e) \gets \textsc{TwoSum}(a_1, e)$
+\State $(c_2, e) \gets \textsc{TwoSum}(a_2, e)$
+\State \textsc{Renorm4}$(c_0, c_1, c_2, e)$
+\State \Return $(c_0, c_1, c_2)$
+\end{algorithmic}
+Cost: 3 \textsc{TwoSum} + 1 renormalization.
+
+\subsection{TD $+$ TD: IEEE-style merge}
+
+The addition of two triple-doubles uses a merge-based algorithm
+analogous to the QD library's \texttt{ieee\_add}.  The six components
+from $a$ and $b$ are merged by descending magnitude:
+\begin{algorithmic}[1]
+\State $i \gets 0;\; j \gets 0;\; k \gets 0$
+\State Pick the larger of $|a_i|$ and $|b_j|$ as $u$; advance the
+  chosen index
+\State Pick the next largest as $v$; advance
+\State $(u, v) \gets \textsc{QuickTwoSum}(u, v)$
+\While{$k < 3$}
+  \State Pick next largest component $t$ from remaining $a_i$ or $b_j$
+  \State $s \gets \textsc{QuickThreeAccum}(u, v, t)$
+  \If{$s \ne 0$} $x_k \gets s;\; k \gets k + 1$ \EndIf
+\EndWhile
+\State Accumulate any leftover components into $x_3$
+\State \textsc{Renorm4}$(x_0, x_1, x_2, x_3)$
+\State \Return $(x_0, x_1, x_2)$
+\end{algorithmic}
+Here \textsc{QuickThreeAccum} absorbs a new value into the running
+pair $(u, v)$ and emits a fully resolved high-order word when
+possible.
+
+\subsection{TD $-$ TD: direct differencing}
+
+Subtraction of two triple-doubles uses component-wise
+\textsc{TwoDiff}, followed by carry propagation via
+\textsc{TwoSum} and \textsc{ThreeSum}:
+\begin{algorithmic}[1]
+\State $(s_0, t_0) \gets \textsc{TwoDiff}(a_0, b_0)$
+\State $(s_1, t_1) \gets \textsc{TwoDiff}(a_1, b_1)$
+\State $(s_2, t_2) \gets \textsc{TwoDiff}(a_2, b_2)$
+\State $(s_1, t_0) \gets \textsc{TwoSum}(s_1, t_0)$
+\State \textsc{ThreeSum}$(s_2, t_0, t_1)$
+\State $t_0 \gets t_0 + t_2$
+\State \textsc{Renorm4}$(s_0, s_1, s_2, t_0)$
+\State \Return $(s_0, s_1, s_2)$
+\end{algorithmic}
+This is more efficient than negating $b$ and using
+\texttt{ieee\_add}, because it avoids the magnitude-comparison
+branches.
+
+
+\section{Multiplication}
+\label{sec:mul}
+
+\subsection{TD $\times$ double}
+
+Multiplying $(a_0, a_1, a_2)$ by a scalar $b$ requires three
+\textsc{TwoProd} calls and carry propagation:
+\begin{algorithmic}[1]
+\State $(p_0, q_0) \gets \textsc{TwoProd}(a_0, b)$
+\State $(p_1, q_1) \gets \textsc{TwoProd}(a_1, b)$
+\State $(p_2, q_2) \gets \textsc{TwoProd}(a_2, b)$
+\State $(p_1, q_0) \gets \textsc{TwoSum}(p_1, q_0)$
+\State $(p_2, q_1) \gets \textsc{TwoSum}(p_2, q_1)$
+\State $q_0 \gets q_0 + q_1 + q_2$
+\State \textsc{Renorm4}$(p_0, p_1, p_2, q_0)$
+\State \Return $(p_0, p_1, p_2)$
+\end{algorithmic}
+Cost: 3 \textsc{TwoProd} + 2 \textsc{TwoSum} + 1 renormalization.
+
+When FMA is available, \textsc{TwoProd} reduces to two operations
+(one FMA + one subtraction), making the entire multiplication very
+efficient.
+
+\subsection{TD $\times$ TD}
+
+The product of $a = (a_0, a_1, a_2)$ and $b = (b_0, b_1, b_2)$
+generates nine cross-products $a_i \cdot b_j$.  Of these, only those
+contributing to the first $\approx 159$ bits of the result need to be
+computed with full error tracking.  The algorithm computes six
+\textsc{TwoProd} calls for the terms of order $\le 2$ (i.e.,
+$i + j \le 2$), then accumulates higher-order terms approximately:
+\begin{algorithmic}[1]
+\State $(p_0, q_0) \gets \textsc{TwoProd}(a_0, b_0)$ \Comment{order 0}
+\State $(p_1, q_1) \gets \textsc{TwoProd}(a_0, b_1)$ \Comment{order 1}
+\State $(p_2, q_2) \gets \textsc{TwoProd}(a_1, b_0)$ \Comment{order 1}
+\State $(p_3, q_3) \gets \textsc{TwoProd}(a_0, b_2)$ \Comment{order 2}
+\State $(p_4, q_4) \gets \textsc{TwoProd}(a_1, b_1)$ \Comment{order 2}
+\State $(p_5, q_5) \gets \textsc{TwoProd}(a_2, b_0)$ \Comment{order 2}
+\State \textit{// Accumulate order-1 terms}
+\State \textsc{ThreeSum}$(p_1, p_2, q_0)$
+\State \textsc{ThreeSum}$(p_2, q_1, q_2)$
+\State \textsc{ThreeSum}$(p_3, p_4, p_5)$
+\State \textit{// Merge order-2 contributions}
+\State $(s_0, t_0) \gets \textsc{TwoSum}(p_2, p_3)$
+\State $(s_1, t_1) \gets \textsc{TwoSum}(q_1, p_4)$
+\State $s_2 \gets q_2 + p_5$
+\State $(s_1, t_0) \gets \textsc{TwoSum}(s_1, t_0)$
+\State $s_2 \gets s_2 + t_0 + t_1$
+\State \textit{// Approximate higher-order terms}
+\State $s_1 \gets s_1 + a_1 b_2 + a_2 b_1 + q_0 + q_3 + q_4 + q_5$
+\State \textsc{Renorm5}$(p_0, p_1, s_0, s_1, s_2)$
+\State \Return $(p_0, p_1, s_0)$
+\end{algorithmic}
+The key insight is that the three order-2 cross-products and their
+error terms contribute to the third component, while the even
+higher-order terms ($a_1 b_2$, $a_2 b_1$, and the six error words
+$q_0, \ldots, q_5$) are accumulated in standard double arithmetic
+because they affect only the lowest bits.
+
+\subsection{Squaring}
+
+Currently, squaring is implemented as \texttt{sqr(a) = a * a}.
+A dedicated squaring routine exploiting the symmetry
+$a_i b_j = a_j b_i$ could reduce the \textsc{TwoProd} count
+from 6 to 4, but this optimization is deferred.
+
+
+\section{Division}
+\label{sec:div}
+
+\subsection{TD $\div$ double}
+
+Division by a scalar uses the standard long-division approach with
+three quotient digits:
+\begin{algorithmic}[1]
+\Require $b \ne 0$
+\State \textit{// Overflow-safe rescaling}
+\If{$|a_0| > 2^{969}$}
+  \State $a \gets a \cdot 2^{-53}$;\; \texttt{rescale} $\gets$ true
+\EndIf
+\State $q_0 \gets a_0 / b$
+\State $(t_0, t_1) \gets \textsc{TwoProd}(q_0, b)$
+\State $r \gets a - (t_0, t_1, 0)$
+\State $q_1 \gets r_0 / b$
+\State $(t_0, t_1) \gets \textsc{TwoProd}(q_1, b)$
+\State $r \gets r - (t_0, t_1, 0)$
+\State $q_2 \gets r_0 / b$
+\State \textsc{Renorm3}$(q_0, q_1, q_2)$
+\If{\texttt{rescale}}
+  \State result $\gets$ result $\cdot 2^{53}$
+\EndIf
+\State \Return $(q_0, q_1, q_2)$
+\end{algorithmic}
+
+\begin{remark}[Overflow protection]
+The threshold $2^{969}$ is chosen so that intermediate products
+$q_i \cdot b$ do not overflow.  Since the quotient digit $q_0$ has
+roughly the same exponent as $a_0$, the product $q_0 \cdot b$ could
+reach $\approx a_0 \cdot b / b = a_0$, which is safe.  But during
+residual computation the subtraction may temporarily widen the
+exponent range.  The rescaling by $2^{-53}$ provides 53 bits of
+headroom, and the inverse scaling $2^{+53}$ is applied to the final
+result.
+\end{remark}
+
+\subsection{TD $\div$ TD}
+
+The algorithm is similar, but each quotient-digit refinement uses
+a full TD$\times$double multiplication for residual computation:
+\begin{algorithmic}[1]
+\Require $b \ne 0$
+\State Apply rescaling if $|a_0| > 2^{969}$
+\State $q_0 \gets a_0 / b_0$
+\State $r \gets a - b \cdot q_0$ \Comment{TD $\times$ double, TD $-$ TD}
+\State $q_1 \gets r_0 / b_0$
+\State $r \gets r - b \cdot q_1$
+\State $q_2 \gets r_0 / b_0$
+\State \textsc{Renorm3}$(q_0, q_1, q_2)$
+\State Apply inverse rescaling if needed
+\State \Return $(q_0, q_1, q_2)$
+\end{algorithmic}
+Three quotient digits suffice because each iteration captures
+$\approx 53$ new bits; three iterations yield $\approx 159$ bits.
+
+
+\section{Square Root}
+\label{sec:sqrt}
+
+The square root uses Newton's method with a double-precision seed:
+\begin{algorithmic}[1]
+\Require $a \ge 0$
+\If{$|a_0| > 2^{969}$} \Comment{overflow-safe rescaling}
+  \State \Return $2 \cdot \sqrt{a/4}$
+\EndIf
+\State $x \gets (\sqrt{a_0}, 0, 0)$ \Comment{double-precision seed}
+\State $x \gets x + (a - x^2) / (2x)$ \Comment{first Newton step}
+\State $x \gets x + (a - x^2) / (2x)$ \Comment{second Newton step}
+\State \Return $x$
+\end{algorithmic}
+Each Newton step roughly doubles the number of correct bits.
+The seed provides $\approx 53$ bits; after two iterations we have
+$\approx 4 \times 53 = 212$ bits, which is more than the 157 bits
+needed.  The extra bits are absorbed during the final
+renormalization.
+
+For the $n$th root (\texttt{nroot}), the implementation solves
+$1/x^n - a = 0$ via Newton iteration in the reciprocal, then
+returns $1/x$.  Three Newton steps are used to converge from a
+double-precision seed.
+
+
+\section{Transcendental Functions}
+\label{sec:transcendental}
+
+The transcendental functions follow the same general strategies as in
+the DD and QD libraries, adapted for triple-double precision.
+
+\subsection{Exponential}
+
+The exponential $e^a$ uses argument reduction and repeated squaring:
+\begin{enumerate}
+\item \textbf{Range check.}  Handle NaN, $\pm\infty$, zero, and
+  overflow/underflow ($|a_0| \ge 709$).
+\item \textbf{Argument reduction.}  Compute
+  $m = \lfloor a / \ln 2 + 0.5 \rfloor$ and
+  $r = (a - m \ln 2) / k$ where $k = 2^{12} = 4096$.
+  This makes $|r| \le \ln 2 / (2k) \approx 8.5 \times 10^{-5}$.
+\item \textbf{Taylor series.}  Evaluate $s = e^r - 1$ via the
+  Taylor series $s = r + r^2/2! + r^3/3! + \cdots$, terminating
+  when $|\text{term}| < \varepsilon_{\mathrm{td}} / k$.
+\item \textbf{Repeated squaring.}  Recover $e^{a/k^2}$ from $s$ by
+  applying $s \gets 2s + s^2$ a total of 12 times
+  ($k = 2^{12}$).
+\item \textbf{Scaling.}  Return $(s + 1) \cdot 2^m$ via
+  \texttt{ldexp}.
+\end{enumerate}
+
+\subsection{Logarithm}
+
+The natural logarithm uses Halley-like Newton iteration on $f(x) =
+a \cdot e^{-x} - 1$:
+\begin{enumerate}
+\item \textbf{Initial estimate.}  Use \texttt{std::frexp} to extract
+  the exponent $e$ and mantissa $m$, then set
+  $x_0 = \ln m + e \cdot \ln 2$ in double precision.
+\item \textbf{Newton refinement.}  Apply
+  $x \gets x + a \cdot e^{-x} - 1$ three times.  Each step
+  roughly triples the number of correct digits (because the
+  iteration has cubic convergence for this particular form).
+\end{enumerate}
+
+\subsection{Trigonometric functions}
+
+The \texttt{sincos} function (which \texttt{sin}, \texttt{cos},
+and \texttt{tan} delegate to) uses a three-stage argument reduction:
+\begin{enumerate}
+\item \textbf{Full-period reduction.}  Compute
+  $z = \mathrm{nint}(a / 2\pi)$ and $r = a - 2\pi z$.
+\item \textbf{Quadrant reduction.}  Compute
+  $q = \lfloor r / (\pi/2) + 0.5 \rfloor$ and
+  $t = r - q \cdot \pi/2$.  The integer $j = q \bmod 4$
+  identifies the quadrant.
+\item \textbf{Fine reduction.}  Compute
+  $q' = \lfloor t / (\pi/16) + 0.5 \rfloor$ and
+  $t \gets t - q' \cdot \pi/16$.  The integer $k = q'$
+  (with $|k| \le 4$) indexes a table of precomputed
+  $(\sin(k\pi/16), \cos(k\pi/16))$ values.
+\end{enumerate}
+
+After reduction, $|t| \le \pi/32 \approx 0.098$, and the Taylor
+series for $\sin t$ and $\cos t$ converge rapidly.  The
+implementation computes $\sin t$ via Taylor and obtains $\cos t$
+as $\sqrt{1 - \sin^2 t}$.  The final result is reconstructed using
+the angle-addition formula:
+\[
+  \sin(k\pi/16 + t) = \sin(k\pi/16)\cos t + \cos(k\pi/16)\sin t,
+\]
+\[
+  \cos(k\pi/16 + t) = \cos(k\pi/16)\cos t - \sin(k\pi/16)\sin t,
+\]
+followed by quadrant adjustment based on $j$.
+
+The table values for $k = 1, 2, 3, 4$ are stored as
+triple-double constants (arrays of three doubles) to avoid
+precision loss.
+
+\subsection{Inverse trigonometric functions}
+
+\begin{itemize}
+\item \texttt{asin}$(a)$ $=$ \texttt{atan2}$(a, \sqrt{1 - a^2})$.
+\item \texttt{acos}$(a)$ $=$ \texttt{atan2}$(\sqrt{1 - a^2}, a)$.
+\item \texttt{atan}$(a)$ $=$ \texttt{atan2}$(a, 1)$.
+\end{itemize}
+
+The core \texttt{atan2}$(y, x)$ function uses Newton iteration.
+After normalization $(x, y) \gets (x, y) / \sqrt{x^2 + y^2}$,
+a double-precision seed $z_0 = \text{atan2}(y_0, x_0)$ is refined
+by three Newton steps of the form:
+\[
+  z \gets z + \frac{y' - \sin z}{\cos z}
+  \quad \text{or} \quad
+  z \gets z - \frac{x' - \cos z}{\sin z},
+\]
+choosing whichever denominator is larger in magnitude.
+
+\subsection{Hyperbolic functions}
+
+\begin{itemize}
+\item For $|a| > 0.05$: $\sinh a = (e^a - e^{-a})/2$,
+  $\cosh a = (e^a + e^{-a})/2$.
+\item For $|a| \le 0.05$: a Taylor series is used for $\sinh$ to
+  avoid catastrophic cancellation:
+  $\sinh a = a + a^3/3! + a^5/5! + \cdots$.
+  Then $\cosh a = \sqrt{1 + \sinh^2 a}$.
+\item $\tanh a = \sinh a / \cosh a$, with the same small-argument
+  branch.
+\end{itemize}
+
+\subsection{Inverse hyperbolic functions}
+
+These use standard identities:
+\begin{align}
+  \mathrm{asinh}(a) &= \ln(a + \sqrt{a^2 + 1}), \\
+  \mathrm{acosh}(a) &= \ln(a + \sqrt{a^2 - 1}), \quad a \ge 1, \\
+  \mathrm{atanh}(a) &= \tfrac{1}{2}\ln\!\bigl(\tfrac{1+a}{1-a}\bigr),
+    \quad |a| < 1.
+\end{align}
+
+\subsection{Integer power and general power}
+
+\texttt{npwr}$(a, n)$ uses binary exponentiation (repeated squaring)
+for $O(\log n)$ multiplications.  \texttt{pow}$(a, b) = e^{b \ln a}$.
+
+
+\section{Precomputed Constants}
+\label{sec:constants}
+
+The following constants are stored as \texttt{static const td\_real}
+members, each given as three double-precision hex or decimal literals
+computed to full triple-double accuracy:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Constant & Value \\
+\midrule
+$\pi$          & \texttt{(3.14159265\ldots e+00, 1.22464679\ldots e$-$16, $-$2.99476980\ldots e$-$33)} \\
+$2\pi$         & \texttt{(6.28318530\ldots e+00, 2.44929359\ldots e$-$16, $-$5.98953961\ldots e$-$33)} \\
+$e$            & \texttt{(2.71828182\ldots e+00, 1.44564689\ldots e$-$16, $-$2.12771710\ldots e$-$33)} \\
+$\ln 2$        & \texttt{(6.93147180\ldots e$-$01, 2.31904681\ldots e$-$17, 5.70770843\ldots e$-$34)} \\
+$\ln 10$       & \texttt{(2.30258509\ldots e+00, $-$2.17075622\ldots e$-$16, $-$9.98426245\ldots e$-$33)} \\
+$\varepsilon$  & $2^{-157} \approx 5.474 \times 10^{-48}$ \\
+min\_normalized & $2^{-1022+2\cdot 53} \approx 1.805 \times 10^{-276}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The minimum normalized value $2^{-916}$ ensures that all three
+components remain in the normal double range.  The trigonometric
+table constants $\sin(k\pi/16)$ and $\cos(k\pi/16)$ for
+$k = 1, 2, 3, 4$ are similarly precomputed.
+
+
+\section{C and Fortran Bindings}
+\label{sec:bindings}
+
+\subsection{C API (\texttt{c\_td.h} / \texttt{c\_td.cpp})}
+
+The C wrapper represents a triple-double as a \texttt{double[3]}
+array and provides functions such as:
+\begin{lstlisting}
+void c_td_add(const double *a, const double *b, double *c);
+void c_td_mul_td_d(const double *a, double b, double *c);
+void c_td_sqrt(const double *a, double *b);
+void c_td_exp(const double *a, double *b);
+// ... etc.
+\end{lstlisting}
+Mixed-precision operations with \texttt{dd\_real} and
+\texttt{qd\_real} are also provided (e.g.,
+\texttt{c\_td\_add\_dd\_td}, \texttt{c\_td\_div\_td\_qd}).  The QD
+interoperability functions use \texttt{to\_td\_real()} and
+\texttt{to\_qd\_conversion()} for type conversion.
+
+\subsection{Fortran 90 module (\texttt{tdmodule})}
+
+The Fortran binding defines a \texttt{td\_real} derived type with
+\texttt{SEQUENCE} and three \texttt{REAL*8} components.  Operator
+overloading is provided for all arithmetic and comparison operators
+through Fortran \texttt{INTERFACE} blocks.  The module depends on
+\texttt{ddmodule} and \texttt{qdmodule}, and uses an
+\texttt{tdext} helper module for the external C wrapper calls
+(via \texttt{FC\_FUNC\_} name-mangling macros).
+
+A complex triple-double type \texttt{td\_complex} is also defined
+(6 doubles: 3 for real part, 3 for imaginary part), with full
+arithmetic support.
+
+Parameters such as \texttt{td\_eps} ($= 2^{-157}$),
+\texttt{td\_huge}, and \texttt{td\_tiny} are provided as module
+constants.
+
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+We have described \texttt{td\_real}, a triple-double floating-point
+type providing $\approx 47$ decimal digits of precision at roughly
+60\% of the cost of quad-double arithmetic.  The implementation
+follows the proven algorithmic framework of the QD library---error-free
+transformations (\textsc{TwoSum}, \textsc{TwoProd}),
+renormalization, and Newton-based transcendental functions---adapted
+for a three-component representation.
+
+Key design decisions include:
+\begin{itemize}
+\item Overflow-safe division and square root via $2^{\pm 53}$
+  rescaling when $|a_0| > 2^{969}$.
+\item A dedicated TD$-$TD subtraction algorithm avoiding the
+  overhead of the merge-based adder.
+\item Three-stage trigonometric argument reduction with precomputed
+  $\sin/\cos$ tables at $\pi/16$ intervals.
+\item Cubic-convergent Newton iteration for $\log$ and $\mathrm{atan2}$.
+\item Full C and Fortran 90 interoperability layers.
+\end{itemize}
+
+The source code is available under a BSD 2-clause license as part
+of the extended QD library.
+
+\begin{thebibliography}{9}
+\bibitem{HLB2001}
+Y.~Hida, X.~S.~Li, and D.~H.~Bailey,
+``Algorithms for quad-double precision floating point arithmetic,''
+in \textit{Proceedings of the 15th IEEE Symposium on Computer
+Arithmetic}, 2001, pp.~155--162.
+
+\bibitem{QDlib}
+Y.~Hida, X.~S.~Li, and D.~H.~Bailey,
+``Library for double-double and quad-double arithmetic,''
+LBNL Technical Report, 2007.
+\url{https://www.davidhbailey.com/dhbpapers/qd.pdf}
+
+\bibitem{Dekker1971}
+T.~J.~Dekker,
+``A floating-point technique for extending the available precision,''
+\textit{Numerische Mathematik}, vol.~18, no.~3, pp.~224--242, 1971.
+
+\bibitem{Knuth1997}
+D.~E.~Knuth,
+\textit{The Art of Computer Programming}, vol.~2:
+\textit{Seminumerical Algorithms}, 3rd ed.
+Addison-Wesley, 1997.
+
+\bibitem{Priest1991}
+D.~M.~Priest,
+``Algorithms for arbitrary precision floating point arithmetic,''
+in \textit{Proceedings of the 10th IEEE Symposium on Computer
+Arithmetic}, 1991, pp.~132--143.
+
+\bibitem{Shewchuk1997}
+J.~R.~Shewchuk,
+``Adaptive precision floating-point arithmetic and fast robust
+geometric predicates,''
+\textit{Discrete \& Computational Geometry},
+vol.~18, no.~3, pp.~305--363, 1997.
+
+\bibitem{Boldo2008}
+S.~Boldo and G.~Melquiond,
+``Emulation of a FMA and correctly-rounded sums: proved algorithms
+using rounding to odd,''
+\textit{IEEE Transactions on Computers},
+vol.~57, no.~4, pp.~462--471, 2008.
+\end{thebibliography}
+
+\end{document}

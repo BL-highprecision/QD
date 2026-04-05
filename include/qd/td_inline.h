@@ -247,6 +247,27 @@ inline bool td_real::is_negative() const {
   return x[0] < 0.0;
 }
 
+/* Sloppy addition: deterministic, component-wise.
+   Satisfies Cray-style error bound.
+   Cost: 4 TwoSum + 2 add + renorm4 = 41 flops. */
+inline td_real td_real::sloppy_add(const td_real &a, const td_real &b) {
+  double s0, s1, s2, t0, t1, t2;
+
+  s0 = qd::two_sum(a[0], b[0], t0);
+  s1 = qd::two_sum(a[1], b[1], t1);
+  s2 = qd::two_sum(a[2], b[2], t2);
+
+  s1 = qd::two_sum(s1, t0, t0);
+  s2 += (t0 + t1);
+  t0 = t2;
+
+  td::renorm(s0, s1, s2, t0);
+  return td_real(s0, s1, s2);
+}
+
+/* IEEE addition: merge-based, data-dependent.
+   Satisfies IEEE-style error bound.
+   Cost: 55--68 flops (data-dependent). */
 inline td_real td_real::ieee_add(const td_real &a, const td_real &b) {
   int i = 0;
   int j = 0;
@@ -321,7 +342,11 @@ inline qd_real operator+(const qd_real &a, const td_real &b) {
 }
 
 inline td_real operator+(const td_real &a, const td_real &b) {
+#ifndef QD_IEEE_ADD
+  return td_real::sloppy_add(a, b);
+#else
   return td_real::ieee_add(a, b);
+#endif
 }
 
 inline td_real &td_real::operator+=(double a) {
@@ -378,6 +403,21 @@ inline qd_real operator-(const qd_real &a, const td_real &b) {
 }
 
 inline td_real operator-(const td_real &a, const td_real &b) {
+#ifndef QD_IEEE_ADD
+  /* Sloppy subtraction: deterministic, component-wise.
+     Cost: 3 TwoDiff + 1 TwoSum + 2 add + renorm4 = 41 flops. */
+  double s0, s1, s2, t0, t1, t2;
+  s0 = qd::two_diff(a[0], b[0], t0);
+  s1 = qd::two_diff(a[1], b[1], t1);
+  s2 = qd::two_diff(a[2], b[2], t2);
+  s1 = qd::two_sum(s1, t0, t0);
+  s2 += (t0 + t1);
+  t0 = t2;
+  td::renorm(s0, s1, s2, t0);
+  return td_real(s0, s1, s2);
+#else
+  /* Accurate subtraction: uses ThreeSum for full error tracking.
+     Cost: 3 TwoDiff + 1 TwoSum + 1 ThreeSum + 1 add + renorm4 = 58 flops. */
   double s0, s1, s2, t0, t1, t2;
   s0 = qd::two_diff(a[0], b[0], t0);
   s1 = qd::two_diff(a[1], b[1], t1);
@@ -387,6 +427,7 @@ inline td_real operator-(const td_real &a, const td_real &b) {
   t0 += t2;
   td::renorm(s0, s1, s2, t0);
   return td_real(s0, s1, s2);
+#endif
 }
 
 inline td_real &td_real::operator-=(double a) {
@@ -543,7 +584,13 @@ inline qd_real operator/(const qd_real &a, const td_real &b) {
   return a / td::to_qd_conversion(b);
 }
 
-inline td_real operator/(const td_real &a, const td_real &b) {
+/* Accurate division: uses full TD*double and TD-TD subtraction for residuals.
+   Cost: 3 div + 2 x (TD*double + TD-TD sub) + renorm3
+       = 3 div + 6 TP + 2*(29 + sub) + 6,
+   where sub = 41 (sloppy, default) or 58 (accurate, QD_IEEE_ADD).
+   Default: 3 div + 6TP + 146.
+   FMA: 3 div + 158.  No FMA: 3 div + 248. */
+inline td_real td_real::accurate_div(const td_real &a, const td_real &b) {
   double q0, q1, q2;
   td_real r;
 
@@ -566,6 +613,52 @@ inline td_real operator/(const td_real &a, const td_real &b) {
   td::renorm(q0, q1, q2);
   td_real result(q0, q1, q2);
   return rescale ? mul_pwr2(result, 0x1p+53) : result;
+}
+
+/* Sloppy division: uses cheap scalar residual instead of full TD-TD sub.
+   Cost: 3 div + 2 x TD*double + 2 x (TwoDiff + ~4 scalar) + 1 add + renorm3
+       = 3 div + 6 TP + 58 + 10 + 9 + 1 + 6 = 3 div + 6 TP + 84.
+   FMA: 3 div + 96.  No FMA: 3 div + 186. */
+inline td_real td_real::sloppy_div(const td_real &a, const td_real &b) {
+  double q0, q1, q2;
+  double s0, s1, t0;
+
+  if (b.is_zero()) {
+    td_real::error("(td_real::operator/): Division by zero.");
+    return td_real::_nan;
+  }
+
+  const bool rescale = td::div_needs_rescale(a[0]);
+  const td_real aa = rescale ? mul_pwr2(a, 0x1p-53) : a;
+
+  q0 = aa[0] / b[0];
+
+  /* Residual r = aa - b*q0 (sloppy: TwoDiff for leading term,
+     plain subtraction for lower terms). */
+  td_real p = b * q0;
+  s0 = qd::two_diff(aa[0], p[0], t0);
+  s1 = (aa[1] - p[1]) + (aa[2] - p[2]) + t0;
+
+  q1 = s0 / b[0];
+
+  /* Second residual r -= b*q1 (sloppy). */
+  p = b * q1;
+  s0 = qd::two_diff(s0, p[0], t0);
+  s1 += t0 - p[1] - p[2];
+
+  q2 = (s0 + s1) / b[0];
+
+  td::renorm(q0, q1, q2);
+  td_real result(q0, q1, q2);
+  return rescale ? mul_pwr2(result, 0x1p+53) : result;
+}
+
+inline td_real operator/(const td_real &a, const td_real &b) {
+#ifdef QD_SLOPPY_DIV
+  return td_real::sloppy_div(a, b);
+#else
+  return td_real::accurate_div(a, b);
+#endif
 }
 
 inline td_real &td_real::operator/=(double a) {

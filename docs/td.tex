@@ -60,8 +60,8 @@ mixed-precision operator semantics that enable seamless
 interoperability among DD, TD, and QD types, including promotion
 rules, lossy truncation with renormalization, and compound-assignment
 handling.  A detailed binary64 flop count analysis shows that TD
-achieves $\approx$74\% of QD's precision at $\approx$63--65\% of
-QD's per-operation cost.
+achieves $\approx$74\% of QD's precision at $\approx$49\% of
+QD's addition cost and $\approx$64\% of its multiplication cost.
 C and Fortran 90 binding layers are also described.  The
 implementation is publicly available under a BSD 2-clause license.
 \end{abstract}
@@ -82,10 +82,9 @@ QD's 63 digits.
 The \texttt{td\_real} type fills this gap.  It stores three
 non-overlapping doubles, yielding $\approx 159$ bits ($\approx 47$
 decimal digits) of significand.  As shown in Section~\ref{sec:cost},
-the per-operation cost is 62--65\% that of QD for the basic
-arithmetic operations: TD$\times$TD requires 6 \textsc{TwoProd}
-calls vs.\ QD's 10, and the 3-component renormalization is cheaper
-than QD's 4-component variant.
+TD addition (default sloppy variant) costs 41~flops vs.\ QD's~84
+(49\%), and TD multiplication costs 116/206~flops (FMA/no FMA)
+vs.\ QD's 182/332 (64\%/62\%).
 
 This paper is organized as follows.  Section~\ref{sec:eft}
 introduces the error-free transformation (EFT) primitives shared
@@ -660,44 +659,55 @@ $\approx 53$ new bits; three iterations yield $\approx 159$ bits.
 \label{sec:cost}
 
 Table~\ref{tab:flop-main} gives the total binary64 flop count for
-each same-type addition and multiplication, derived by composing
-the primitive costs from Tables~\ref{tab:eft-costs}
-and~\ref{tab:renorm-costs}.  Since addition and subtraction use
-only \textsc{TwoSum}/\textsc{TwoDiff}/\textsc{QuickTwoSum}
-(all independent of FMA), FMA affects only the multiplication
-columns.
+each same-type addition, subtraction, multiplication, and division,
+derived by composing the primitive costs from
+Tables~\ref{tab:eft-costs} and~\ref{tab:renorm-costs}.
+Addition and subtraction use only
+\textsc{TwoSum}/\textsc{TwoDiff}/\textsc{QuickTwoSum}
+(all independent of FMA), so FMA affects only the multiplication
+and division columns.
+The default variant for each type is marked with~$\star$.
 
-\begin{table}[h]
+\begin{table}[ht]
 \centering
-\caption{Binary64 flop counts for DD, TD, and QD addition and
-  multiplication.  \#TP denotes the number of \textsc{TwoProd} calls.
-  FMA counts each fused multiply-add as 1~flop.}
+\caption{Binary64 flop counts for DD, TD, and QD arithmetic.
+  \#TP = number of \textsc{TwoProd} calls.
+  FMA counts each fused multiply-add as 1~flop.
+  Division costs exclude 2--3 scalar \texttt{double/double}
+  divisions (counted separately as ``div'' in the Breakdown column).
+  $\star$ = default variant.}
 \label{tab:flop-main}
-\begin{tabular}{llrrrc}
+\begin{tabular}{llrrrl}
 \toprule
 Operation & Variant & FMA & No FMA & \#TP & Breakdown \\
 \midrule
-DD$+$DD & sloppy (default) & 11 & 11 & 0
+DD$+$DD & sloppy$\,\star$ & 11 & 11 & 0
   & $1\,\text{TS}+2+1\,\text{QTS}$ \\
 DD$+$DD & ieee & 20 & 20 & 0
   & $2\,\text{TS}+2+2\,\text{QTS}$ \\
-DD$\times$DD & --- & 9 & 24 & 1
+DD$\times$DD & ---$\,\star$ & 9 & 24 & 1
   & $1\,\text{TP}+2\,\text{mul}+2\,\text{add}+1\,\text{QTS}$ \\
 \midrule
-TD$+$TD & ieee\_add (typical) & 55 & 55 & 0
-  & $1\,\text{QTS}+3\,\text{QTA}+1+\text{renorm4}$ \\
-TD$+$TD & ieee\_add (worst) & 68 & 68 & 0
-  & $1\,\text{QTS}+4\,\text{QTA}+2+\text{renorm4}$ \\
-TD$-$TD & direct & 58 & 58 & 0
+TD$+$TD & sloppy$\,\star$ & 41 & 41 & 0
+  & $4\,\text{TS}+2+\text{renorm4}$ \\
+TD$+$TD & ieee & 55--68 & 55--68 & 0
+  & $1\,\text{QTS}+3\text{--}4\,\text{QTA}+\text{renorm4}$ \\
+TD$-$TD & sloppy$\,\star$ & 41 & 41 & 0
+  & $3\,\text{TD}+1\,\text{TS}+2+\text{renorm4}$ \\
+TD$-$TD & accurate & 58 & 58 & 0
   & $3\,\text{TD}+1\,\text{TS}+1\,\text{3S}+1+\text{renorm4}$ \\
-TD$\times$TD & --- & 116 & 206 & 6
+TD$\times$TD & ---$\,\star$ & 116 & 206 & 6
   & $6\,\text{TP}+3\,\text{3S}+3\,\text{TS}+8+\text{renorm5}$ \\
+TD$\div$TD & accurate$\,\star$ & $3\text{d}+158$ & $3\text{d}+248$ & 6
+  & $2\times(\text{TD}{\times}\text{d}+\text{TD}{\text{-}}\text{TD})+\text{rn3}$ \\
+TD$\div$TD & sloppy & $3\text{d}+96$ & $3\text{d}+186$ & 6
+  & $2\times(\text{TD}{\times}\text{d}+\text{TwoDiff}+\text{4})+\text{rn3}$ \\
 \midrule
-QD$+$QD & sloppy (default) & 84 & 84 & 0
+QD$+$QD & sloppy$\,\star$ & 84 & 84 & 0
   & $5\,\text{TS}+1\,\text{3S}+1\,\text{3S2}+2+\text{renorm5}$ \\
 QD$\times$QD & sloppy & 120 & 210 & 6
   & $6\,\text{TP}+3\,\text{3S}+3\,\text{TS}+12+\text{renorm5}$ \\
-QD$\times$QD & accurate (default) & 182 & 332 & 10
+QD$\times$QD & accurate$\,\star$ & 182 & 332 & 10
   & $10\,\text{TP}+3\,\text{3S}+11\,\text{TS}+11+\text{renorm5}$ \\
 \bottomrule
 \end{tabular}
@@ -706,65 +716,82 @@ QD$\times$QD & accurate (default) & 182 & 332 & 10
 TS = \textsc{TwoSum}(6), TD = \textsc{TwoDiff}(6),
 QTS = \textsc{QuickTwoSum}(3), TP = \textsc{TwoProd}(2/17),
 3S = \textsc{ThreeSum}(18), 3S2 = \textsc{ThreeSum2}(13),
-QTA = \textsc{QuickThreeAccum}(12).
-Numerals without abbreviation denote plain add/mul flops.
+QTA = \textsc{QuickThreeAccum}(12),
+d = scalar \texttt{double} division,
+rn3/rn4 = \texttt{renorm} 3/4-component.
+Default variants: addition/subtraction = sloppy
+(\texttt{QD\_IEEE\_ADD} selects ieee/accurate);
+division = accurate
+(\texttt{QD\_SLOPPY\_DIV} selects sloppy).
+Division costs assume default (sloppy) subtraction inside
+\texttt{accurate\_div}.
 \end{table}
 
 Several observations are noteworthy:
 
 \begin{itemize}
-\item The TD$+$TD \texttt{ieee\_add} is data-dependent because the
-  merge loop emits a resolved word only when the running pair
-  $(u, v)$ in \textsc{QuickThreeAccum} is fully occupied.  In the
-  typical case, 3 of the 4 remaining components emit immediately,
-  giving 55~flops.  The worst case (4 iterations without early
-  emission) costs 68~flops.
+\item The TD \texttt{sloppy\_add} (41~flops) replaces the
+  \textsc{ThreeSum} in the carry-propagation stage with plain
+  double-precision addition, saving 16~flops vs.\ the accurate
+  variant (58~flops for subtraction, comparable for addition) while
+  maintaining Cray-style error bounds.  This matches the DD/QD
+  convention where the default addition is the sloppy variant.
 
-\item The TD$-$TD \texttt{direct} subtraction (58~flops) is
-  slightly more expensive than the typical TD$+$TD (55~flops) but
-  avoids the data-dependent branches entirely, giving deterministic
-  performance.
+\item The TD \texttt{ieee\_add} (55--68~flops) remains available via
+  \texttt{QD\_IEEE\_ADD} for applications requiring a tighter IEEE-style
+  error bound.  Its cost is data-dependent because the merge loop
+  emits a resolved word only when the running pair $(u, v)$ in
+  \textsc{QuickThreeAccum} is fully occupied.
+
+\item TD \texttt{sloppy\_div} saves 62~flops vs.\
+  \texttt{accurate\_div} by replacing each full TD$-$TD subtraction
+  (41~flops) in the residual computation with a \textsc{TwoDiff} +
+  scalar chain ($\approx$10~flops).  The cost reduction is 39\%
+  with FMA ($3\text{d}+96$ vs.\ $3\text{d}+158$).
 
 \item TD$\times$TD and QD$\times$QD \texttt{sloppy\_mul} have the
   same structure (6 \textsc{TwoProd} + 3 \textsc{ThreeSum}), but
   QD accumulates 4 additional approximate multiply-adds for the
-  $O(\varepsilon^3)$ terms ($a_0 b_3$, $a_1 b_2$, $a_2 b_1$,
-  $a_3 b_0$).  TD omits only the terms with $i+j > 2$.
+  $O(\varepsilon^3)$ terms.
 
 \item FMA provides a $\approx 1.8\times$ speedup for multiplication
-  (e.g., 116 vs.\ 206 for TD$\times$TD) but does not affect addition.
+  (e.g., 116 vs.\ 206 for TD$\times$TD) and a $\approx 1.6\times$
+  speedup for division, but does not affect addition or subtraction.
 \end{itemize}
 
-Table~\ref{tab:flop-ratio} gives the normalized cost ratios.  TD
-achieves approximately 74\% of QD's precision (157 vs.\ 212 bits)
-at approximately 63--65\% of QD's per-operation cost, confirming
+Table~\ref{tab:flop-ratio} gives the normalized cost ratios using
+default variants.  TD achieves approximately 74\% of QD's
+precision (157 vs.\ 212 bits) at approximately 49\% of QD's
+addition cost and 64\% of QD's multiplication cost, confirming
 that it fills the DD--QD gap cost-effectively.
 
 \begin{table}[h]
 \centering
-\caption{Flop ratios, using default variants.  ``Ratio'' is
-relative to DD.}
+\caption{Flop ratios using default variants.  ``Ratio'' is
+  relative to DD.  Division excludes scalar \texttt{double/double}
+  divisions.}
 \label{tab:flop-ratio}
-\begin{tabular}{lcccccc}
+\begin{tabular}{lccccc}
 \toprule
-      & \multicolumn{3}{c}{Addition} &
-        \multicolumn{3}{c}{Multiplication (FMA / No FMA)} \\
-\cmidrule(lr){2-4} \cmidrule(lr){5-7}
-Type  & Bits & Flops & Ratio & Flops & Ratio & TD/QD \\
+      & & Addition & Multiplication & \multicolumn{2}{c}{TD / QD} \\
+\cmidrule(lr){5-6}
+Type  & Bits & Flops (Ratio) & FMA / No FMA (Ratio) & Add & Mul \\
 \midrule
-DD    & 106  & 11  & $1.0\times$  & 9 / 24   & $1.0\times$
-  & --- \\
-TD    & 157  & 55  & $5.0\times$  & 116 / 206 & $12.9\times$ / $8.6\times$
-  & 65\% / 65\% \\
-QD    & 212  & 84  & $7.6\times$  & 182 / 332 & $20.2\times$ / $13.8\times$
-  & ---  \\
+DD    & 106  & 11 ($1.0\times$) & 9 / 24 ($1.0\times$)
+  & --- & --- \\
+TD    & 157  & 41 ($3.7\times$) & 116 / 206 ($12.9\times$ / $8.6\times$)
+  & 49\% & 64\% / 62\% \\
+QD    & 212  & 84 ($7.6\times$) & 182 / 332 ($20.2\times$ / $13.8\times$)
+  & --- & --- \\
 \bottomrule
 \end{tabular}
 \\[2pt]
 \footnotesize
-TD/QD column shows TD cost as a percentage of QD cost:
-addition $55/84 = 65\%$; multiplication $116/182 = 64\%$
-(FMA), $206/332 = 62\%$ (no FMA).
+Default variants: DD/TD/QD addition = sloppy,
+TD multiplication = (only one variant),
+QD multiplication = accurate.
+TD/QD column: addition $41/84 = 49\%$;
+multiplication $116/182 = 64\%$ (FMA), $206/332 = 62\%$ (no FMA).
 \end{table}
 
 
@@ -1838,11 +1865,15 @@ cost-per-digit.
 
 We have described \texttt{td\_real}, a triple-double floating-point
 type providing $\approx 47$ decimal digits of precision ($\approx
-74\%$ of QD's 63 digits) at 62--65\% of the per-operation cost of
-quad-double arithmetic (Section~\ref{sec:cost}): TD addition
-costs 55~flops vs.\ QD's~84, and TD multiplication costs 116~flops
-(FMA) or 206~flops (no FMA) vs.\ QD's 182 or~332.  The
-implementation follows the proven algorithmic framework of the QD
+74\%$ of QD's 63 digits) at 49--64\% of QD's per-operation cost
+(Section~\ref{sec:cost}): TD addition (sloppy, default) costs
+41~flops vs.\ QD's~84 (49\%), and TD multiplication costs
+116~flops (FMA) or 206~flops (no FMA) vs.\ QD's 182 or~332
+(64\%/62\%).  Sloppy and accurate variants of both addition
+and division are provided, following the DD/QD convention of
+compile-time selection via \texttt{QD\_IEEE\_ADD} and
+\texttt{QD\_SLOPPY\_DIV}.
+The implementation follows the proven algorithmic framework of the QD
 library---error-free transformations (\textsc{TwoSum},
 \textsc{TwoProd}), renormalization, and Newton-based transcendental
 functions---adapted for a three-component representation.

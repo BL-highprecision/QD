@@ -127,6 +127,10 @@ struct QD_API td_real {
   bool isinf() const { return QD_ISINF(x[0]); }
 
   static td_real ieee_add(const td_real &a, const td_real &b);
+  static td_real sloppy_add(const td_real &a, const td_real &b);
+
+  static td_real accurate_div(const td_real &a, const td_real &b);
+  static td_real sloppy_div(const td_real &a, const td_real &b);
 
   td_real &operator+=(double a);
   td_real &operator+=(const dd_real &a);

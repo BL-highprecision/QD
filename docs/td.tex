@@ -55,7 +55,14 @@ algorithms for renormalization, addition (both IEEE-style merge and
 Knuth--M{\o}ller chain), subtraction, multiplication, division with
 overflow-safe rescaling, square root via Newton iteration, and
 transcendental functions (exp, log, sin, cos, atan2, sinh, cosh,
-etc.).  C and Fortran 90 binding layers are also described.  The
+etc.).  We also describe the type-conversion algorithms and
+mixed-precision operator semantics that enable seamless
+interoperability among DD, TD, and QD types, including promotion
+rules, lossy truncation with renormalization, and compound-assignment
+handling.  A detailed binary64 flop count analysis shows that TD
+achieves $\approx$74\% of QD's precision at $\approx$63--65\% of
+QD's per-operation cost.
+C and Fortran 90 binding layers are also described.  The
 implementation is publicly available under a BSD 2-clause license.
 \end{abstract}
 
@@ -74,21 +81,205 @@ QD's 63 digits.
 
 The \texttt{td\_real} type fills this gap.  It stores three
 non-overlapping doubles, yielding $\approx 159$ bits ($\approx 47$
-decimal digits) of significand.  The per-operation cost is roughly
-$50\text{--}60\%$ that of QD for the basic arithmetic operations,
-because multiplication generates $\binom{3}{2}\cdot 2 + 3 = 9$
-partial products instead of QD's 16, and renormalization sorts three
-components instead of four.
+decimal digits) of significand.  As shown in Section~\ref{sec:cost},
+the per-operation cost is 62--65\% that of QD for the basic
+arithmetic operations: TD$\times$TD requires 6 \textsc{TwoProd}
+calls vs.\ QD's 10, and the 3-component renormalization is cheaper
+than QD's 4-component variant.
 
-This paper is organized as follows.  Section~\ref{sec:representation}
+This paper is organized as follows.  Section~\ref{sec:eft}
+introduces the error-free transformation (EFT) primitives shared
+with the DD and QD libraries.
+Section~\ref{sec:representation}
 defines the triple-double representation and its invariants.
 Section~\ref{sec:renorm} presents the renormalization algorithms.
 Sections~\ref{sec:add}--\ref{sec:div} describe the four basic
-arithmetic operations.  Section~\ref{sec:sqrt} covers square root.
+arithmetic operations.  Section~\ref{sec:cost} gives a detailed
+binary64 flop count comparison among DD, TD, and QD.
+Section~\ref{sec:mixed} details the
+type-conversion algorithms and mixed-precision operator semantics
+for interoperability among DD, TD, and QD.
+Section~\ref{sec:sqrt} covers square root.
 Section~\ref{sec:transcendental} describes the transcendental
 function implementations.  Section~\ref{sec:constants} lists the
 precomputed constants.  Section~\ref{sec:bindings} outlines the C
-and Fortran binding layers.  Section~\ref{sec:conclusion} concludes.
+and Fortran binding layers.
+Section~\ref{sec:conclusion} concludes.
+
+
+\section{Preliminaries: Error-Free Transformations}
+\label{sec:eft}
+
+The triple-double arithmetic, like the DD and QD types before it,
+is built upon a small set of \emph{error-free transformations}
+(EFTs)---operations that compute both the floating-point result and
+its rounding error exactly in double precision.  These primitives
+reside in \texttt{include/inline.h} within the \texttt{qd} namespace
+and are shared by all three multi-word types.
+
+\begin{definition}[\textsc{TwoSum}~{\cite{Knuth1997,Dekker1971}}]
+Given IEEE 754 doubles $a$ and $b$, \textsc{TwoSum} computes
+$s = \mathrm{fl}(a + b)$ and $e = (a + b) - s$ exactly, so that
+$a + b = s + e$:
+\begin{lstlisting}
+double two_sum(double a, double b, double &err) {
+  double s = a + b;
+  double bb = s - a;
+  err = (a - (s - bb)) + (b - bb);
+  return s;
+}
+\end{lstlisting}
+Cost: 6 flops.  No assumption on the relative magnitudes of $a$
+and $b$.
+\end{definition}
+
+\begin{definition}[\textsc{QuickTwoSum}~{\cite{Dekker1971}}]
+A faster variant requiring $|a| \ge |b|$:
+\begin{lstlisting}
+double quick_two_sum(double a, double b, double &err) {
+  double s = a + b;
+  err = b - (s - a);
+  return s;
+}
+\end{lstlisting}
+Cost: 3 flops.  Used extensively in renormalization where the
+magnitude ordering is known.
+\end{definition}
+
+\begin{definition}[\textsc{TwoDiff}]
+The subtraction analogue of \textsc{TwoSum}: computes
+$s = \mathrm{fl}(a - b)$ and $e$ such that $a - b = s + e$.
+\begin{lstlisting}
+double two_diff(double a, double b, double &err) {
+  double s = a - b;
+  double bb = s - a;
+  err = (a - (s - bb)) - (b + bb);
+  return s;
+}
+\end{lstlisting}
+\end{definition}
+
+\begin{definition}[\textsc{TwoProd}~{\cite{Dekker1971}}]
+Computes $p = \mathrm{fl}(a \cdot b)$ and $e = a \cdot b - p$
+exactly.  When a fused multiply-add (FMA) instruction is available
+(\texttt{QD\_FMS} defined), this reduces to two operations:
+\begin{lstlisting}
+double two_prod(double a, double b, double &err) {
+#ifdef QD_FMS
+  double p = a * b;
+  err = QD_FMS(a, b, p);   // fma(a, b, -p)
+  return p;
+#else
+  // Dekker splitting fallback: 17 flops
+  double a_hi, a_lo, b_hi, b_lo;
+  double p = a * b;
+  split(a, a_hi, a_lo);
+  split(b, b_hi, b_lo);
+  err = ((a_hi*b_hi - p) + a_hi*b_lo + a_lo*b_hi) + a_lo*b_lo;
+  return p;
+#endif
+}
+\end{lstlisting}
+The \texttt{split} function uses the Veltkamp splitting constant
+$\sigma = 2^{27} + 1$ to decompose a double into 26-bit halves,
+with a threshold guard at $2^{996}$ to avoid overflow.
+\end{definition}
+
+\begin{definition}[\textsc{ThreeSum}]
+A TD-specific helper that exactly adds three doubles $a, b, c$ and
+produces three non-overlapping outputs:
+\begin{lstlisting}
+void three_sum(double &a, double &b, double &c) {
+  double t1, t2, t3;
+  t1 = two_sum(a, b, t2);
+  a  = two_sum(c, t1, t3);
+  b  = two_sum(t2, t3, c);
+}
+\end{lstlisting}
+Cost: 3 \textsc{TwoSum} = 18 flops.  After the call,
+$a_{\text{old}} + b_{\text{old}} + c_{\text{old}} = a + b + c$
+with $|b| \le \frac{1}{2}\,\mathrm{ulp}(a)$ and
+$|c| \le \frac{1}{2}\,\mathrm{ulp}(b)$.  This is used in the
+TD$\times$TD multiplication to accumulate partial products.
+\end{definition}
+
+\begin{definition}[\textsc{QuickThreeAccum}]
+Absorbs a new value $c$ into a running pair $(a, b)$ and returns
+a ``finished'' high word when both $a$ and $b$ are non-zero:
+\begin{lstlisting}
+double quick_three_accum(double &a, double &b, double c) {
+  double s = two_sum(b, c, b);
+  s = two_sum(a, s, a);
+  if (a != 0.0 && b != 0.0) return s;
+  if (b == 0.0) { b = a; a = s; }
+  else           { a = s; }
+  return 0.0;
+}
+\end{lstlisting}
+This is the core of the IEEE-style merge addition
+(Section~\ref{sec:add}).  Returning 0 signals that the accumulator
+has absorbed the value without emitting a resolved word.
+\end{definition}
+
+\begin{definition}[\textsc{MulPwr2}]
+Multiplies a triple-double by a power of two, component-wise:
+\begin{lstlisting}
+td_real mul_pwr2(const td_real &a, double d) {
+  return td_real(a[0]*d, a[1]*d, a[2]*d);
+}
+\end{lstlisting}
+Since $d$ is a power of two, each multiplication is exact (no
+rounding).  This operation is $O(1)$ and is used extensively in
+the overflow-safe rescaling of division and square root
+(Sections~\ref{sec:div} and~\ref{sec:sqrt}).
+\end{definition}
+
+\begin{remark}[The \textsc{Split} threshold]
+\label{rem:split}
+The \textsc{TwoProd} non-FMA path uses the Veltkamp splitting
+constant $\sigma = 2^{27} + 1$.  Computing $\sigma \cdot a$ can
+overflow if $|a| > 2^{996}$ (since
+$2^{996} \cdot (2^{27} + 1) \approx 2^{1023}$).  The
+\texttt{split} function therefore prescales by $2^{-28}$ when
+$|a| > 2^{996}$ and post-scales by $2^{28}$.  This built-in
+threshold protects \emph{all} EFT-based arithmetic, but division
+and square root require additional rescaling because their
+intermediate computations can generate values that challenge the
+$2^{996}$ boundary---see Remark~\ref{rem:threshold969}.
+\end{remark}
+
+These seven primitives---\textsc{TwoSum}, \textsc{QuickTwoSum},
+\textsc{TwoDiff}, \textsc{TwoProd}, \textsc{ThreeSum},
+\textsc{QuickThreeAccum}, and \textsc{MulPwr2}---together with
+the \textsc{Split} threshold mechanism, form the complete
+foundation upon which all TD arithmetic operations are built.
+
+Table~\ref{tab:eft-costs} summarizes the cost of each primitive
+in binary64 floating-point operations.  Since only \textsc{TwoProd}
+involves a multiplication with error tracking, the FMA
+availability affects it alone; all other primitives are
+addition-based and have identical costs in both cases.
+
+\begin{table}[h]
+\centering
+\caption{Cost of EFT primitives in binary64 flops.
+  FMA = 1 flop.}
+\label{tab:eft-costs}
+\begin{tabular}{lccl}
+\toprule
+Primitive & FMA & No FMA & Notes \\
+\midrule
+\textsc{TwoSum}          & 6  & 6  & Knuth/Dekker \\
+\textsc{QuickTwoSum}     & 3  & 3  & requires $|a|\ge|b|$ \\
+\textsc{TwoDiff}         & 6  & 6  & subtraction analogue \\
+\textsc{TwoProd}         & 2  & 17 & FMA: $p$+fms; else: Dekker split \\
+\textsc{ThreeSum}        & 18 & 18 & $= 3\times\textsc{TwoSum}$ \\
+\textsc{ThreeSum2}       & 13 & 13 & $= 2\times\textsc{TwoSum}+1$ \\
+\textsc{QuickThreeAccum} & 12 & 12 & $= 2\times\textsc{TwoSum}$ \\
+\textsc{MulPwr2}         & 3  & 3  & component-wise, exact \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 
 \section{Representation and Invariants}
@@ -209,6 +400,27 @@ significant partial sums.  The structure is analogous: a 4-step
 bottom-up sweep followed by a top-down compression with
 zero-skipping at each level.  The final $c_3$ value (and beyond)
 is discarded, truncating to triple-double precision.
+
+Table~\ref{tab:renorm-costs} summarizes the renormalization costs.
+All consist entirely of \textsc{QuickTwoSum} calls (3~flops each),
+so FMA availability is irrelevant.
+
+\begin{table}[h]
+\centering
+\caption{Renormalization costs (worst-case branch path).}
+\label{tab:renorm-costs}
+\begin{tabular}{lcl}
+\toprule
+Variant & Flops & Composition \\
+\midrule
+\texttt{td::renorm}$(c_0,c_1,c_2)$             & 6  & $2\times$QTS \\
+\texttt{td::renorm}$(c_0,c_1,c_2,c_3)$         & 15 & $5\times$QTS \\
+\texttt{td::renorm}$(c_0,c_1,c_2,c_3,c_4)$     & 21 & $7\times$QTS \\
+\texttt{qd::renorm}$(c_0,c_1,c_2,c_3)$         & 15 & $5\times$QTS \\
+\texttt{qd::renorm}$(c_0,c_1,c_2,c_3,c_4)$     & 21 & $7\times$QTS \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 
 \section{Addition}
@@ -337,6 +549,27 @@ A dedicated squaring routine exploiting the symmetry
 $a_i b_j = a_j b_i$ could reduce the \textsc{TwoProd} count
 from 6 to 4, but this optimization is deferred.
 
+\begin{remark}[Multiplication has no overflow protection]
+\label{rem:mul-no-rescale}
+Unlike division and square root (which apply explicit rescaling
+when $|a_0| > 2^{969}$), the multiplication operators
+TD$\times$double and TD$\times$TD do \emph{not} include overflow
+guards.  They rely entirely on the \textsc{Split} function's
+built-in prescaling at $|a| > 2^{996}$
+(Remark~\ref{rem:split}).  This is safe because multiplication
+does not amplify the exponent of a single operand's components:
+the products $a_i \cdot b_j$ have exponents bounded by
+$\exp(a_i) + \exp(b_j)$, and if both inputs are representable
+doubles, all partial products remain below $2^{1023}$.  The
+\textsc{Split} threshold at $2^{996}$ provides 27 bits of
+headroom for the $\sigma = 2^{27} + 1$ multiplier.
+
+Division and square root, by contrast, generate intermediate
+residuals and quotient digits whose exponent relationships are
+less predictable, necessitating the additional $2^{969}$ threshold
+(see Remark~\ref{rem:threshold969} below).
+\end{remark}
+
 
 \section{Division}
 \label{sec:div}
@@ -365,15 +598,42 @@ three quotient digits:
 \State \Return $(q_0, q_1, q_2)$
 \end{algorithmic}
 
-\begin{remark}[Overflow protection]
-The threshold $2^{969}$ is chosen so that intermediate products
-$q_i \cdot b$ do not overflow.  Since the quotient digit $q_0$ has
-roughly the same exponent as $a_0$, the product $q_0 \cdot b$ could
-reach $\approx a_0 \cdot b / b = a_0$, which is safe.  But during
-residual computation the subtraction may temporarily widen the
-exponent range.  The rescaling by $2^{-53}$ provides 53 bits of
-headroom, and the inverse scaling $2^{+53}$ is applied to the final
-result.
+\begin{remark}[Overflow protection in division]
+\label{rem:threshold969}
+The threshold $2^{969}$ and the rescaling factor $2^{-53}$ are
+derived from the \textsc{Split} threshold $2^{996}$
+(Remark~\ref{rem:split}).
+
+In the TD$\div$TD algorithm, the residual step computes
+$r = a' - b \cdot q_0$ where $q_0 = a'_0 / b_0$.  The product
+$b \cdot q_0$ is a TD$\times$double operation, which internally
+calls \textsc{TwoProd}$(b_i, q_0)$ for each component $b_i$.
+Inside the non-FMA \textsc{TwoProd}, the \textsc{Split} function
+computes $\sigma \cdot b_i$ where $\sigma = 2^{27} + 1$.  If the
+divisor $b$ has not been rescaled, $|b_0|$ can be as large as
+$\approx 2^{1023}$, and \textsc{Split} handles this via its
+built-in prescaling at $2^{996}$.
+
+The danger arises from the \emph{quotient digit} $q_0$.  If
+$|a_0|$ is large and $|b_0|$ is moderate, $q_0 \approx a_0 / b_0$
+inherits the large exponent of $a_0$.  \textsc{TwoProd}$(q_0, b)$
+then requires \textsc{Split}$(q_0)$, which computes
+$\sigma \cdot q_0$.  For this to stay below $2^{1023}$, we need
+$|q_0| < 2^{996}$.  After rescaling $a$ by $2^{-53}$, we have
+$|q_0| \le |a_0| \cdot 2^{-53} / |b_0| \le 2^{1023-53} / 1 =
+2^{970}$, which is safely below $2^{996}$.
+
+The choice $2^{969}$ as the trigger (rather than $2^{996}$ directly)
+provides a conservative margin: $996 - 969 = 27$ bits, matching
+the $\log_2 \sigma = 27$ bits consumed by the splitting constant.
+
+Note that the rescaling is applied \emph{once}, not iteratively.
+After a single rescaling by $2^{-53}$, the worst-case numerator
+exponent is $2^{970}$, which exceeds the trigger $2^{969}$ but
+remains below the actual danger zone $2^{996}$.  The trigger
+is a conservative pre-check, not a precise boundary; the true
+safety invariant is $|q_i| < 2^{996}$, which the single
+rescaling guarantees.
 \end{remark}
 
 \subsection{TD $\div$ TD}
@@ -396,6 +656,409 @@ Three quotient digits suffice because each iteration captures
 $\approx 53$ new bits; three iterations yield $\approx 159$ bits.
 
 
+\section{Computational Cost Analysis}
+\label{sec:cost}
+
+Table~\ref{tab:flop-main} gives the total binary64 flop count for
+each same-type addition and multiplication, derived by composing
+the primitive costs from Tables~\ref{tab:eft-costs}
+and~\ref{tab:renorm-costs}.  Since addition and subtraction use
+only \textsc{TwoSum}/\textsc{TwoDiff}/\textsc{QuickTwoSum}
+(all independent of FMA), FMA affects only the multiplication
+columns.
+
+\begin{table}[h]
+\centering
+\caption{Binary64 flop counts for DD, TD, and QD addition and
+  multiplication.  \#TP denotes the number of \textsc{TwoProd} calls.
+  FMA counts each fused multiply-add as 1~flop.}
+\label{tab:flop-main}
+\begin{tabular}{llrrrc}
+\toprule
+Operation & Variant & FMA & No FMA & \#TP & Breakdown \\
+\midrule
+DD$+$DD & sloppy (default) & 11 & 11 & 0
+  & $1\,\text{TS}+2+1\,\text{QTS}$ \\
+DD$+$DD & ieee & 20 & 20 & 0
+  & $2\,\text{TS}+2+2\,\text{QTS}$ \\
+DD$\times$DD & --- & 9 & 24 & 1
+  & $1\,\text{TP}+2\,\text{mul}+2\,\text{add}+1\,\text{QTS}$ \\
+\midrule
+TD$+$TD & ieee\_add (typical) & 55 & 55 & 0
+  & $1\,\text{QTS}+3\,\text{QTA}+1+\text{renorm4}$ \\
+TD$+$TD & ieee\_add (worst) & 68 & 68 & 0
+  & $1\,\text{QTS}+4\,\text{QTA}+2+\text{renorm4}$ \\
+TD$-$TD & direct & 58 & 58 & 0
+  & $3\,\text{TD}+1\,\text{TS}+1\,\text{3S}+1+\text{renorm4}$ \\
+TD$\times$TD & --- & 116 & 206 & 6
+  & $6\,\text{TP}+3\,\text{3S}+3\,\text{TS}+8+\text{renorm5}$ \\
+\midrule
+QD$+$QD & sloppy (default) & 84 & 84 & 0
+  & $5\,\text{TS}+1\,\text{3S}+1\,\text{3S2}+2+\text{renorm5}$ \\
+QD$\times$QD & sloppy & 120 & 210 & 6
+  & $6\,\text{TP}+3\,\text{3S}+3\,\text{TS}+12+\text{renorm5}$ \\
+QD$\times$QD & accurate (default) & 182 & 332 & 10
+  & $10\,\text{TP}+3\,\text{3S}+11\,\text{TS}+11+\text{renorm5}$ \\
+\bottomrule
+\end{tabular}
+\\[2pt]
+\footnotesize
+TS = \textsc{TwoSum}(6), TD = \textsc{TwoDiff}(6),
+QTS = \textsc{QuickTwoSum}(3), TP = \textsc{TwoProd}(2/17),
+3S = \textsc{ThreeSum}(18), 3S2 = \textsc{ThreeSum2}(13),
+QTA = \textsc{QuickThreeAccum}(12).
+Numerals without abbreviation denote plain add/mul flops.
+\end{table}
+
+Several observations are noteworthy:
+
+\begin{itemize}
+\item The TD$+$TD \texttt{ieee\_add} is data-dependent because the
+  merge loop emits a resolved word only when the running pair
+  $(u, v)$ in \textsc{QuickThreeAccum} is fully occupied.  In the
+  typical case, 3 of the 4 remaining components emit immediately,
+  giving 55~flops.  The worst case (4 iterations without early
+  emission) costs 68~flops.
+
+\item The TD$-$TD \texttt{direct} subtraction (58~flops) is
+  slightly more expensive than the typical TD$+$TD (55~flops) but
+  avoids the data-dependent branches entirely, giving deterministic
+  performance.
+
+\item TD$\times$TD and QD$\times$QD \texttt{sloppy\_mul} have the
+  same structure (6 \textsc{TwoProd} + 3 \textsc{ThreeSum}), but
+  QD accumulates 4 additional approximate multiply-adds for the
+  $O(\varepsilon^3)$ terms ($a_0 b_3$, $a_1 b_2$, $a_2 b_1$,
+  $a_3 b_0$).  TD omits only the terms with $i+j > 2$.
+
+\item FMA provides a $\approx 1.8\times$ speedup for multiplication
+  (e.g., 116 vs.\ 206 for TD$\times$TD) but does not affect addition.
+\end{itemize}
+
+Table~\ref{tab:flop-ratio} gives the normalized cost ratios.  TD
+achieves approximately 74\% of QD's precision (157 vs.\ 212 bits)
+at approximately 63--65\% of QD's per-operation cost, confirming
+that it fills the DD--QD gap cost-effectively.
+
+\begin{table}[h]
+\centering
+\caption{Flop ratios, using default variants.  ``Ratio'' is
+relative to DD.}
+\label{tab:flop-ratio}
+\begin{tabular}{lcccccc}
+\toprule
+      & \multicolumn{3}{c}{Addition} &
+        \multicolumn{3}{c}{Multiplication (FMA / No FMA)} \\
+\cmidrule(lr){2-4} \cmidrule(lr){5-7}
+Type  & Bits & Flops & Ratio & Flops & Ratio & TD/QD \\
+\midrule
+DD    & 106  & 11  & $1.0\times$  & 9 / 24   & $1.0\times$
+  & --- \\
+TD    & 157  & 55  & $5.0\times$  & 116 / 206 & $12.9\times$ / $8.6\times$
+  & 65\% / 65\% \\
+QD    & 212  & 84  & $7.6\times$  & 182 / 332 & $20.2\times$ / $13.8\times$
+  & ---  \\
+\bottomrule
+\end{tabular}
+\\[2pt]
+\footnotesize
+TD/QD column shows TD cost as a percentage of QD cost:
+addition $55/84 = 65\%$; multiplication $116/182 = 64\%$
+(FMA), $206/332 = 62\%$ (no FMA).
+\end{table}
+
+
+\section{Type Conversion and Mixed-Precision Arithmetic}
+\label{sec:mixed}
+
+A key design goal of \texttt{td\_real} is seamless interoperability
+with the existing \texttt{dd\_real} and \texttt{qd\_real} types.
+This section describes the conversion algorithms and the
+mixed-precision operator semantics.
+
+\subsection{Conversion between TD and QD}
+
+\subsubsection{QD $\to$ TD: truncation with renormalization}
+
+A quad-double $q = (q_0, q_1, q_2, q_3)$ has four components; to
+convert it to a triple-double we must discard the lowest component
+while preserving the non-overlapping invariant.  Simply dropping
+$q_3$ would leave a valid triple-double only if $(q_0, q_1, q_2)$
+already satisfies the invariant, which is not guaranteed after
+QD arithmetic.  The implementation therefore applies a 4-component
+renormalization before truncation:
+\begin{algorithmic}[1]
+\Function{FromQdTruncate}{$q$}
+  \State $(x_0, x_1, x_2, x_3) \gets (q_0, q_1, q_2, q_3)$
+  \State \textsc{Renorm4}$(x_0, x_1, x_2, x_3)$
+    \Comment{restores non-overlapping}
+  \State \Return $(x_0, x_1, x_2)$
+    \Comment{$x_3$ discarded}
+\EndFunction
+\end{algorithmic}
+The renormalization step ensures that the carry from $x_3$ is
+properly propagated into $x_2$, $x_1$, and $x_0$ before the
+truncation.  The relative error of this conversion is bounded by
+$\varepsilon_{\mathrm{td}} = 2^{-157}$.
+
+This function is used by the \texttt{explicit} constructor
+\texttt{td\_real(const qd\_real \&qd)} and the assignment operator
+\texttt{td\_real::operator=(const qd\_real \&)}, as well as
+internally by all mixed TD--QD compound-assignment operators.
+
+\subsubsection{TD $\to$ QD: zero-extension}
+
+The reverse conversion is lossless: a triple-double
+$(a_0, a_1, a_2)$ is promoted to a quad-double by appending a
+zero fourth component:
+\begin{algorithmic}[1]
+\Function{ToQdConversion}{$a$}
+  \State \Return $(a_0, a_1, a_2, 0)$
+\EndFunction
+\end{algorithmic}
+Since the non-overlapping invariant of the original triple-double
+is a subset of the quad-double invariant, no renormalization is
+needed.  The result is exact.
+
+\subsection{Conversion between TD and DD}
+
+\subsubsection{DD $\to$ TD}
+
+A double-double $(d_0, d_1)$ is promoted to triple-double by
+zero-extending the third component:
+\begin{lstlisting}
+td_real(const dd_real &dd) {
+  x[0] = dd._hi();
+  x[1] = dd._lo();
+  x[2] = 0.0;
+}
+\end{lstlisting}
+This is exact and preserves the non-overlapping invariant, since
+the DD invariant $|d_1| \le \frac{1}{2}\,\mathrm{ulp}(d_0)$ is
+strictly stronger than what TD requires for its first two components.
+
+\subsubsection{TD $\to$ DD: lossy truncation}
+
+Truncating from triple-double to double-double discards $a_2$ but
+must account for its contribution to the DD pair:
+\begin{lstlisting}
+dd_real to_dd_real(const td_real &a) {
+  dd_real result(a[0], a[1]);
+  result += a[2];  // absorb low component
+  return result;
+}
+\end{lstlisting}
+The \texttt{+=} operation on \texttt{dd\_real} re-normalizes the
+pair, ensuring that the carry from $a_2$ is correctly propagated.
+The relative error is $O(\varepsilon_{\mathrm{dd}}) = O(2^{-106})$.
+
+\subsection{Mixed-precision arithmetic operators}
+
+The C++ operator overloads follow a \emph{promotion rule}:
+
+\begin{center}
+\begin{tabular}{lccl}
+\toprule
+Operation & Left type & Right type & Result type \\
+\midrule
+\texttt{td + d}   & TD     & double & TD \\
+\texttt{td + dd}  & TD     & DD     & TD \\
+\texttt{td + td}  & TD     & TD     & TD \\
+\texttt{td + qd}  & TD     & QD     & QD \\
+\texttt{qd + td}  & QD     & TD     & QD \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The general principle is:
+\begin{itemize}
+\item When \emph{both} operands fit within TD precision (double,
+  DD, or TD), the result is TD.  The narrower operand is promoted
+  to TD before the operation.
+\item When \emph{either} operand is QD, the result is QD.  The TD
+  operand is promoted to QD via \textsc{ToQdConversion}, and the
+  operation is performed using the existing QD arithmetic.
+\end{itemize}
+
+The same promotion rule applies to subtraction, multiplication,
+and division.  This design keeps TD as a ``closed'' type for
+operations among double/DD/TD, while automatically widening to QD
+when QD precision is requested by either operand.
+
+\subsubsection{Implementation of TD $\otimes$ QD}
+
+For all four binary operators $\otimes \in \{+, -, \times, /\}$,
+the TD--QD mixed operation is:
+\begin{lstlisting}
+qd_real operator+(const td_real &a, const qd_real &b) {
+  return td::to_qd_conversion(a) + b;  // QD + QD
+}
+\end{lstlisting}
+The conversion \textsc{ToQdConversion} is $O(1)$ (a simple copy
+with a zero append), so the cost is dominated by the QD operation
+itself.
+
+\subsubsection{Implementation of TD $\otimes$ DD}
+
+For DD operands, promotion to TD is used:
+\begin{lstlisting}
+td_real operator+(const td_real &a, const dd_real &b) {
+  return a + td_real(b);  // TD + TD
+}
+\end{lstlisting}
+The DD-to-TD promotion is also $O(1)$ (copy two doubles, set third
+to zero).
+
+\subsection{Compound-assignment operators with QD}
+
+The compound-assignment operators (\texttt{+=}, \texttt{-=},
+\texttt{*=}, \texttt{/=}) for QD right-hand sides require special
+care because the result type of TD $\otimes$ QD is QD, but the
+target variable is TD.  The implementation therefore performs the
+operation in QD and then truncates:
+\begin{lstlisting}
+td_real &td_real::operator+=(const qd_real &a) {
+  *this = td::from_qd_truncate(
+            td::to_qd_conversion(*this) + a);
+  return *this;
+}
+\end{lstlisting}
+The sequence is: (1)~promote \texttt{*this} to QD, (2)~perform QD
+addition, (3)~truncate the QD result back to TD via
+\textsc{FromQdTruncate}.  This ensures that the full QD precision
+of the intermediate result is correctly rounded into the TD target.
+
+The same pattern applies to \texttt{-=}, \texttt{*=}, and
+\texttt{/=} with QD operands.
+
+\subsection{Cross-type comparison}
+
+Comparison operators between TD and QD are implemented by promoting
+the TD operand to QD:
+\begin{lstlisting}
+bool operator<(const td_real &a, const qd_real &b) {
+  return td::to_qd_conversion(a) < b;
+}
+\end{lstlisting}
+This is exact because TD$\to$QD is lossless.  For TD vs.\ DD
+comparisons, the DD operand is promoted to TD, which is also exact
+(DD$\to$TD is lossless).
+
+The C API provides explicit comparison functions for mixed types:
+\texttt{c\_td\_comp\_td\_qd} and \texttt{c\_td\_comp\_qd\_td},
+which convert to TD before comparing (truncating the QD operand).
+This is a deliberate design choice: the C API operates entirely
+in TD space, so QD arguments are truncated to TD precision before
+comparison.  This differs from the C++ operator semantics where
+the comparison is performed in QD space.
+
+\subsection{Interaction with DD's compound-assignment operators}
+
+The \texttt{dd\_real} type is also extended with compound-assignment
+operators that accept \texttt{td\_real}:
+\begin{lstlisting}
+dd_real &dd_real::operator+=(const td_real &a) {
+  *this += to_dd_real(a);
+  return *this;
+}
+\end{lstlisting}
+Here the TD operand is truncated to DD before the DD addition.
+Similarly, \texttt{qd\_real} gains compound-assignment operators
+for TD operands by promoting TD to QD:
+\begin{lstlisting}
+qd_real &qd_real::operator+=(const td_real &a) {
+  *this += td::to_qd_conversion(a);
+  return *this;
+}
+\end{lstlisting}
+These extensions make all three types (DD, TD, QD) mutually
+interoperable in both directions.
+
+\subsection{Structural modifications to the DD and QD headers}
+
+Integrating \texttt{td\_real} into the QD library required
+coordinated changes to the existing \texttt{dd\_real.h} and
+\texttt{qd\_real.h} headers.  These modifications are worth
+documenting because they define the ``surface area'' of the TD
+extension visible to code that uses DD or QD without directly
+including \texttt{td\_real.h}.
+
+\subsubsection{Changes to \texttt{dd\_real.h}}
+
+A forward declaration \texttt{struct td\_real;} is added before
+the \texttt{dd\_real} struct definition.  The following TD-aware
+members and free functions are added:
+\begin{itemize}
+\item \textbf{Compound-assignment operators}:
+  \texttt{operator+=}, \texttt{-=}, \texttt{*=}, \texttt{/=}
+  accepting \texttt{const td\_real \&}.
+\item \textbf{Binary arithmetic operators}:
+  \texttt{operator+}, \texttt{-}, \texttt{*}, \texttt{/} for
+  (DD, TD) and (TD, DD) pairs, all returning \texttt{td\_real}.
+\item \textbf{Comparison operators}:
+  \texttt{==}, \texttt{!=}, \texttt{<}, \texttt{>}, \texttt{<=},
+  \texttt{>=} for (DD, TD) and (TD, DD) pairs.
+\end{itemize}
+These additions follow the promotion rule: DD $\otimes$ TD yields
+TD, never DD.
+
+\subsubsection{Changes to \texttt{qd\_real.h}}
+
+Similarly, \texttt{qd\_real.h} gains a forward declaration and:
+\begin{itemize}
+\item \textbf{Compound-assignment operators}:
+  \texttt{operator+=}, \texttt{-=}, \texttt{*=}, \texttt{/=}
+  accepting \texttt{const td\_real \&}.
+\item \textbf{Binary arithmetic operators}:
+  \texttt{operator+}, \texttt{-}, \texttt{*}, \texttt{/} for
+  (QD, TD) and (TD, QD) pairs, all returning \texttt{qd\_real}.
+\item \textbf{Comparison operators}:
+  \texttt{==}, \texttt{!=}, \texttt{<}, \texttt{>}, \texttt{<=},
+  \texttt{>=} for (QD, TD) and (TD, QD) pairs.
+\item \textbf{C API additions} (\texttt{c\_qd.h}):
+  Functions like \texttt{c\_qd\_add\_td\_qd},
+  \texttt{c\_qd\_selfadd\_td}, \texttt{c\_qd\_copy\_td},
+  \texttt{c\_qd\_comp\_qd\_td}, etc.
+\end{itemize}
+These follow the QD promotion rule: QD $\otimes$ TD yields QD.
+
+\subsubsection{Changes to \texttt{c\_dd.h}}
+
+The C wrapper header for DD also gains TD-aware functions:
+\texttt{c\_dd\_add\_dd\_td}, \texttt{c\_dd\_sub\_td\_dd},
+\texttt{c\_dd\_mul\_dd\_td}, \texttt{c\_dd\_div\_td\_dd},
+\texttt{c\_dd\_copy\_td}, \texttt{c\_dd\_selfadd\_td},
+\texttt{c\_dd\_comp\_dd\_td}, etc.  These enable C (and Fortran)
+code to perform mixed DD--TD arithmetic through the C binding layer.
+
+\subsubsection{Header inclusion order}
+
+The inclusion order matters:
+\texttt{dd\_real.h} $\to$ \texttt{qd\_real.h} $\to$
+\texttt{td\_real.h}.  Since \texttt{dd\_real.h} and
+\texttt{qd\_real.h} only use a forward declaration of
+\texttt{td\_real}, they do not depend on the full TD definition.
+The inline implementations of the TD-aware operators on DD and QD
+are placed in \texttt{td\_inline.h}, which is included at the end
+of \texttt{td\_real.h} (guarded by \texttt{QD\_INLINE}).  This
+avoids circular dependencies while keeping the operators inlinable.
+
+\subsection{Summary of conversion costs}
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+Conversion & Cost & Exact? & Renorm needed? \\
+\midrule
+DD $\to$ TD & $O(1)$: copy + zero & Yes & No \\
+TD $\to$ DD & $O(1)$: DD \texttt{+=} & No ($\varepsilon_{\mathrm{dd}}$) & DD renorm \\
+TD $\to$ QD & $O(1)$: copy + zero & Yes & No \\
+QD $\to$ TD & $O(1)$: 4-renorm + truncate & No ($\varepsilon_{\mathrm{td}}$) & Yes (4-comp) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+
 \section{Square Root}
 \label{sec:sqrt}
 
@@ -403,18 +1066,53 @@ The square root uses Newton's method with a double-precision seed:
 \begin{algorithmic}[1]
 \Require $a \ge 0$
 \If{$|a_0| > 2^{969}$} \Comment{overflow-safe rescaling}
-  \State \Return $2 \cdot \sqrt{a/4}$
+  \State \Return $2 \cdot \textsc{Sqrt}(a/4)$
+    \Comment{recursive call}
 \EndIf
 \State $x \gets (\sqrt{a_0}, 0, 0)$ \Comment{double-precision seed}
 \State $x \gets x + (a - x^2) / (2x)$ \Comment{first Newton step}
 \State $x \gets x + (a - x^2) / (2x)$ \Comment{second Newton step}
 \State \Return $x$
 \end{algorithmic}
-Each Newton step roughly doubles the number of correct bits.
-The seed provides $\approx 53$ bits; after two iterations we have
-$\approx 4 \times 53 = 212$ bits, which is more than the 157 bits
-needed.  The extra bits are absorbed during the final
+Each Newton step has quadratic convergence, roughly doubling the
+number of correct bits per step.  The seed provides $\approx 53$
+bits; after two iterations we have $\approx 212$ bits, which
+exceeds the 157 bits needed.  The excess is absorbed during
 renormalization.
+
+\begin{remark}[Recursive rescaling in square root]
+\label{rem:sqrt-recurse}
+Unlike division, which applies a single non-recursive rescaling
+by $2^{-53}$ (Remark~\ref{rem:threshold969}), the square root
+uses \emph{recursive} rescaling: \texttt{sqrt} calls itself with
+the argument divided by~4.  The identity used is
+$\sqrt{a} = 2\sqrt{a/4}$.
+
+The recursion depth depends on the input exponent.
+\textsc{MulPwr2}$(a, 0.25)$ reduces $\exp(a_0)$ by~2 per call.
+Starting from the maximum double exponent 1023, the recursion
+terminates when $\exp(a_0) \le 969$, requiring at most
+$\lceil(1023 - 969)/2\rceil = 27$ recursive calls.  While this
+is computationally wasteful for extreme inputs, such values are
+rare in practice.
+
+The reason recursive rescaling is needed (rather than a single
+large rescale) is that the Newton iteration computes $x^2$ via
+the TD$\times$TD multiplication, which in turn calls
+\textsc{TwoProd} on the components of~$x$.  If $a_0 \approx
+2^{e}$, then $x_0 \approx 2^{e/2}$, and the cross-products
+$x_0 \cdot x_1$ in the squaring step have exponent $\approx
+e/2 + (e/2 - 53) = e - 53$.  For the \textsc{Split} operation
+on these cross-products to remain safe, we need $e - 53 < 996$,
+i.e., $e < 1049$, which is always satisfied for representable
+doubles.  However, the more stringent constraint comes from
+the \emph{division} $/(2x)$ in the Newton step, which triggers
+the division rescaling path (Remark~\ref{rem:threshold969}) if
+the residual $(a - x^2)$ has $|a_0 - x_0^2| > 2^{969}$.
+By reducing the input to $\le 2^{969}$, the square root
+ensures that all intermediate values in both the squaring and
+the division sub-operations remain in the safe regime.
+\end{remark}
 
 For the $n$th root (\texttt{nroot}), the implementation solves
 $1/x^n - a = 0$ via Newton iteration in the reciprocal, then
@@ -577,6 +1275,29 @@ $k = 1, 2, 3, 4$ are similarly precomputed.
 \section{C and Fortran Bindings}
 \label{sec:bindings}
 
+The QD library provides language bindings in three layers: a C API
+for direct use from C code, a Fortran wrapper layer that calls the
+C API via name-mangled external functions, and a Fortran~90 module
+that provides operator overloading and type-safe interfaces.  The
+TD extension replicates this three-layer architecture exactly.
+
+\subsection{Three-layer architecture}
+
+The binding architecture is:
+\[
+  \underbrace{\texttt{tdmodule}}_{\text{Fortran 90 module}}
+  \;\xrightarrow{\text{calls}}\;
+  \underbrace{\texttt{tdext}}_{\text{interface block}}
+  \;\xrightarrow{\texttt{FC\_FUNC\_}}\;
+  \underbrace{\texttt{f\_td.cpp}}_{\text{C++ wrappers}}
+  \;\xrightarrow{\text{uses}}\;
+  \underbrace{\texttt{td\_real}}_{\text{C++ class}}
+\]
+This mirrors the existing DD and QD paths:
+\texttt{ddmodule}$\to$\texttt{ddext}$\to$\texttt{f\_dd.cpp}$\to$\texttt{dd\_real}
+and
+\texttt{qdmodule}$\to$\texttt{qdext}$\to$\texttt{f\_qd.cpp}$\to$\texttt{qd\_real}.
+
 \subsection{C API (\texttt{c\_td.h} / \texttt{c\_td.cpp})}
 
 The C wrapper represents a triple-double as a \texttt{double[3]}
@@ -586,43 +1307,545 @@ void c_td_add(const double *a, const double *b, double *c);
 void c_td_mul_td_d(const double *a, double b, double *c);
 void c_td_sqrt(const double *a, double *b);
 void c_td_exp(const double *a, double *b);
-// ... etc.
 \end{lstlisting}
 Mixed-precision operations with \texttt{dd\_real} and
 \texttt{qd\_real} are also provided (e.g.,
 \texttt{c\_td\_add\_dd\_td}, \texttt{c\_td\_div\_td\_qd}).  The QD
 interoperability functions use \texttt{to\_td\_real()} and
 \texttt{to\_qd\_conversion()} for type conversion.
+Self-modifying variants (\texttt{c\_td\_selfadd},
+\texttt{c\_td\_selfmul\_dd}, etc.), copy functions
+(\texttt{c\_td\_copy\_dd}, \texttt{c\_td\_copy\_qd}), and
+comparison functions (\texttt{c\_td\_comp\_td\_qd},
+\texttt{c\_td\_comp\_qd\_td}) complete the C interface.
+
+\subsection{Fortran external interface (\texttt{tdext.f})}
+
+The \texttt{tdext} module contains \texttt{INTERFACE} blocks
+declaring the external C++ wrapper functions from
+\texttt{f\_td.cpp}.  Each subroutine is declared with explicit
+\texttt{INTENT} attributes and \texttt{REAL*8} arrays of length~3
+for triple-double arguments.  The \texttt{PURE} attribute is
+applied to all arithmetic and comparison wrappers:
+\begin{lstlisting}[language=Fortran]
+module tdext
+  implicit none
+  interface
+    pure subroutine f_td_add(a, b, c)
+      real*8, intent(in) :: a(3), b(3)
+      real*8, intent(out) :: c(3)
+    end subroutine
+    ! ... 40+ additional declarations
+  end interface
+end
+\end{lstlisting}
+The \texttt{PURE} annotations enable the compiler to use these
+wrappers inside \texttt{FORALL} and \texttt{DO CONCURRENT}
+constructs, and are safe because the underlying C++ functions have
+no side effects for non-exceptional inputs.
+
+\subsection{Fortran wrapper (\texttt{f\_td.cpp})}
+
+The C++ side of the Fortran interface uses \texttt{FC\_FUNC\_}
+macros for portable Fortran name mangling (handling the trailing
+underscore convention):
+\begin{lstlisting}
+#define f_td_add  FC_FUNC_(f_td_add, F_TD_ADD)
+\end{lstlisting}
+Each function constructs temporary \texttt{td\_real} objects from
+the \texttt{double*} arguments, performs the operation, and writes
+the result back via a \texttt{TO\_DOUBLE\_PTR} macro:
+\begin{lstlisting}
+#define TO_DOUBLE_PTR(a, ptr) \
+  ptr[0] = (a)[0]; ptr[1] = (a)[1]; ptr[2] = (a)[2];
+
+void f_td_add(const double *a, const double *b, double *c) {
+  TO_DOUBLE_PTR(td_real(a) + td_real(b), c);
+}
+\end{lstlisting}
+
+The Fortran wrapper also provides functions not available in the C
+API, including local implementations of \texttt{floor},
+\texttt{ceil}, and \texttt{aint} (truncation toward zero) for
+triple-double arguments, as well as a \texttt{tdrand\_local}
+function that generates random triple-double values in $[0, 1)$
+by accumulating six scaled \texttt{std::rand()} calls.
 
 \subsection{Fortran 90 module (\texttt{tdmodule})}
 
-The Fortran binding defines a \texttt{td\_real} derived type with
-\texttt{SEQUENCE} and three \texttt{REAL*8} components.  Operator
-overloading is provided for all arithmetic and comparison operators
-through Fortran \texttt{INTERFACE} blocks.  The module depends on
-\texttt{ddmodule} and \texttt{qdmodule}, and uses an
-\texttt{tdext} helper module for the external C wrapper calls
-(via \texttt{FC\_FUNC\_} name-mangling macros).
+The \texttt{tdmodule} is the primary user-facing Fortran interface.
+It \texttt{USE}s both \texttt{ddmodule} and \texttt{qdmodule}
+(for the \texttt{dd\_real} and \texttt{qd\_real} types) and
+\texttt{tdext} (for the external wrapper calls), then defines the
+derived types and operator overloads.
 
-A complex triple-double type \texttt{td\_complex} is also defined
-(6 doubles: 3 for real part, 3 for imaginary part), with full
-arithmetic support.
+\subsubsection{Derived types}
 
-Parameters such as \texttt{td\_eps} ($= 2^{-157}$),
-\texttt{td\_huge}, and \texttt{td\_tiny} are provided as module
-constants.
+\begin{lstlisting}[language=Fortran]
+type td_real
+  sequence
+  real*8 :: re(3)
+end type td_real
+
+type td_complex
+  sequence
+  real*8 :: cmp(6)     ! (1:3) = real, (4:6) = imaginary
+end type td_complex
+\end{lstlisting}
+The \texttt{SEQUENCE} attribute ensures binary compatibility with
+the C \texttt{double[3]} layout, enabling direct pass-by-reference
+to the C++ wrappers without marshalling.
+
+\subsubsection{Module constants}
+
+\begin{lstlisting}[language=Fortran]
+real*8 d_td_eps
+parameter (d_td_eps = 5.47382212626881668d-48)
+type (td_real) td_one, td_zero, td_eps, td_huge, td_tiny
+parameter (td_one  = td_real((/1.0d0, 0.0d0, 0.0d0/)))
+parameter (td_zero = td_real((/0.0d0, 0.0d0, 0.0d0/)))
+parameter (td_eps  = td_real((/d_td_eps, 0.0d0, 0.0d0/)))
+\end{lstlisting}
+These constants mirror those in the C++ class
+(\texttt{td\_real::\_eps}, etc.) and provide Fortran-idiomatic
+access without calling functions.
+
+\subsubsection{Operator overloading}
+
+The module overloads all standard Fortran operators through
+\texttt{INTERFACE} blocks.  The complete set is:
+
+\begin{center}
+\begin{tabular}{lp{7.5cm}}
+\toprule
+Category & Overloaded interfaces \\
+\midrule
+Assignment & \texttt{=} for TD$\leftrightarrow$\{double, integer,
+  DD, QD, string, TD\_complex\} (21 variants) \\
+Arithmetic & \texttt{+}, \texttt{-}, \texttt{*}, \texttt{/} for
+  TD$\otimes$\{TD, double, integer\} and TD\_complex variants;
+  \texttt{**} for power \\
+Comparison & \texttt{==}, \texttt{/=}, \texttt{>}, \texttt{<},
+  \texttt{>=}, \texttt{<=} for TD$\otimes$\{TD, double, integer\}
+  and TD\_complex \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{Mixed-type conversions in Fortran}
+
+The Fortran module provides explicit conversion functions via
+generic interfaces:
+\begin{lstlisting}[language=Fortran]
+interface tdreal   ! construct td_real from other types
+  module procedure to_td_d, to_td_dd, to_td_qd, to_td_i, ...
+end interface
+interface ddreal   ! td_real -> dd_real
+  module procedure to_dd_td
+end interface
+interface qdreal   ! td_real -> qd_real
+  module procedure to_qd_td
+end interface
+\end{lstlisting}
+The mixed-type assignment procedures implement the same promotion
+semantics as the C++ operators, but with Fortran array-slice
+syntax:
+\begin{lstlisting}[language=Fortran]
+elemental subroutine assign_td_dd(td, dd)
+  type (td_real), intent(inout) :: td
+  type (dd_real), intent(in) :: dd
+  td%re(1:2) = dd%re      ! copy DD components
+  td%re(3) = 0.d0         ! zero-extend
+end subroutine
+
+elemental subroutine assign_qd_td(qd, td)
+  type (qd_real), intent(inout) :: qd
+  type (td_real), intent(in) :: td
+  qd%re(1:3) = td%re      ! copy TD components
+  qd%re(4) = 0.d0         ! zero-extend
+end subroutine
+\end{lstlisting}
+
+\begin{remark}[Fortran vs.\ C++ conversion semantics]
+The Fortran QD$\to$TD assignment (\texttt{assign\_td\_qd}) simply
+copies the first three components: \texttt{td\%re = qd\%re(1:3)}.
+This differs from the C++ \texttt{from\_qd\_truncate}, which
+applies a 4-component renormalization before truncation.  The
+Fortran version is therefore slightly less safe: if the QD value
+has non-canonical component ordering (e.g., after accumulated
+rounding), the truncation may lose more than
+$\varepsilon_{\mathrm{td}}$ relative accuracy.  In practice this
+rarely matters because QD values produced by the library maintain
+the non-overlapping invariant.
+\end{remark}
+
+\subsubsection{Intrinsic function overloading}
+
+The module overloads standard Fortran intrinsics so that
+triple-double values can be used transparently:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Intrinsic & TD overload \\
+\midrule
+\texttt{sin}, \texttt{cos}, \texttt{tan} & via \texttt{tdsin},
+  \texttt{tdcos}, \texttt{tdtan} \\
+\texttt{exp}, \texttt{log}, \texttt{log10} & via \texttt{tdexp},
+  \texttt{tdlog}, \texttt{tdlog10} \\
+\texttt{sqrt}, \texttt{abs} & via \texttt{tdsqrt},
+  \texttt{tdabs} \\
+\texttt{huge}, \texttt{tiny}, \texttt{epsilon} & return TD
+  constants \\
+\texttt{digits}, \texttt{precision}, \texttt{range} & return
+  157, 47, 276 respectively \\
+\texttt{nint}, \texttt{aint}, \texttt{floor}, \texttt{ceil}
+  & rounding functions \\
+\texttt{sign}, \texttt{mod}, \texttt{min}, \texttt{max}
+  & utility functions \\
+\texttt{random\_number} & TD-precision uniform $[0,1)$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The \texttt{td\_complex} type also overloads \texttt{conjg},
+\texttt{aimag}, \texttt{exp}, \texttt{log}, and \texttt{abs}.
+
+\subsubsection{Complex arithmetic}
+
+The \texttt{td\_complex} type supports the same operator set as
+\texttt{td\_real}, with mixed operations against \texttt{td\_real}
+and \texttt{double}.  Complex arithmetic is implemented in
+Fortran using the standard formulas (e.g., $(a+bi)(c+di) =
+(ac-bd) + (ad+bc)i$), where each real multiplication and addition
+calls the underlying TD wrappers.  Conversions to/from
+\texttt{dd\_complex} and \texttt{qd\_complex} are provided.
+
+\subsection{Quadrature test programs}
+
+The QD library includes a suite of high-precision numerical
+quadrature test programs by Bailey, implementing Gaussian
+(\texttt{tquadgsq}), tanh-sinh (\texttt{tquadtsq}), and error
+function (\texttt{tquaderq}) methods, including 2D variants
+(\texttt{tquadgsq2d}, \texttt{tquadtsq2d}).  These programs
+\texttt{USE qdmodule} and exercise the full operator overloading
+infrastructure.  They serve as integration tests validating that
+the Fortran module, external interface, and C++ wrappers function
+correctly together across complex numerical algorithms.
+Adapting these test programs from \texttt{qdmodule} to
+\texttt{tdmodule} (by changing \texttt{qd\_real} to
+\texttt{td\_real} and adjusting tolerance parameters from
+$10^{-64}$ to $10^{-47}$) is straightforward due to the
+interface-compatible module design.
+
+\subsection{Binding layer comparison}
+
+Table~\ref{tab:binding-layers} summarizes the parallel structure
+of the DD, TD, and QD binding stacks, showing how TD fills the
+middle slot with consistent naming and layout conventions.
+
+\begin{table}[h]
+\centering
+\caption{Parallel structure of DD, TD, and QD binding layers.}
+\label{tab:binding-layers}
+\begin{tabular}{lccc}
+\toprule
+Layer & DD & TD & QD \\
+\midrule
+C++ header       & \texttt{dd\_real.h}   & \texttt{td\_real.h}   & \texttt{qd\_real.h}   \\
+Inline header    & \texttt{dd\_inline.h} & \texttt{td\_inline.h} & \texttt{qd\_inline.h} \\
+C wrapper        & \texttt{c\_dd.h/.cpp} & \texttt{c\_td.h/.cpp} & \texttt{c\_qd.h/.cpp} \\
+Fortran wrapper  & \texttt{f\_dd.cpp}    & \texttt{f\_td.cpp}    & \texttt{f\_qd.cpp}    \\
+External module  & \texttt{ddext.f}      & \texttt{tdext.f}      & (qdext)               \\
+High-level module& \texttt{ddmodule}     & \texttt{tdmodule}     & \texttt{qdmodule}     \\
+\midrule
+Array size       & \texttt{re(2)}        & \texttt{re(3)}        & \texttt{re(4)}        \\
+Complex size     & \texttt{cmp(4)}       & \texttt{cmp(6)}       & \texttt{cmp(8)}       \\
+Module deps      & \texttt{ddext}        & \texttt{ddmod,qdmod,tdext} & (qdext)          \\
+\texttt{PURE} wrappers & Yes             & Yes                   & Yes                   \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The key structural difference is that \texttt{tdmodule} depends
+on both \texttt{ddmodule} and \texttt{qdmodule} (via
+\texttt{USE \ldots, ONLY:}) to import the existing types for
+cross-type assignment.  Neither \texttt{ddmodule} nor
+\texttt{qdmodule} depends on \texttt{tdmodule}, maintaining a
+strict one-directional dependency that avoids circular module
+references.
+
+\subsection{Unchanged components: \texttt{f\_dd.cpp} and
+\texttt{f\_qd.cpp}}
+
+A notable design choice is that the existing DD and QD Fortran
+wrappers (\texttt{f\_dd.cpp}, \texttt{f\_qd.cpp}) are
+\emph{entirely unmodified} by the TD extension.  This contrasts
+with the C++ and C layers, where \texttt{dd\_real.h},
+\texttt{qd\_real.h}, \texttt{c\_dd.h}, and \texttt{c\_qd.h} all
+gained TD-aware operator declarations and wrapper functions
+(Section~\ref{sec:mixed}).
+
+In Fortran, all cross-type DD$\leftrightarrow$TD and
+QD$\leftrightarrow$TD operations are handled entirely within
+\texttt{tdmod.f} using Fortran-level type conversion followed by
+same-type arithmetic.  For example, adding a \texttt{dd\_real} to
+a \texttt{td\_real} in Fortran proceeds as:
+(1)~the \texttt{dd\_real} is promoted to \texttt{td\_real} via
+\texttt{assign\_td\_dd} (array-slice copy + zero-extension);
+(2)~the TD$+$TD addition is performed by calling
+\texttt{f\_td\_add} through the \texttt{tdext} interface.
+This approach keeps the existing DD and QD Fortran stacks
+completely stable, at the cost of an extra copy for the type
+promotion.
+
+\subsection{Complex arithmetic details}
+
+The \texttt{td\_complex} type stores 6 doubles in a
+\texttt{SEQUENCE} struct: components 1--3 for the real part and
+4--6 for the imaginary part.  All complex operations are
+implemented in pure Fortran within \texttt{tdmod.f} using the
+underlying \texttt{td\_real} operations.  For example:
+
+\begin{lstlisting}[language=Fortran]
+type(td_real) function mul_tdc(a, b) result(c)
+  ! (a1+a2*i)*(b1+b2*i) = (a1*b1-a2*b2) + (a1*b2+a2*b1)*i
+  type(td_complex), intent(in) :: a, b
+  type(td_real) :: a1, a2, b1, b2
+  a1 = td_real(a%cmp(1:3)); a2 = td_real(a%cmp(4:6))
+  b1 = td_real(b%cmp(1:3)); b2 = td_real(b%cmp(4:6))
+  c%cmp(1:3) = (a1*b1 - a2*b2)%re  ! real part
+  c%cmp(4:6) = (a1*b2 + a2*b1)%re  ! imaginary part
+end function
+\end{lstlisting}
+(Simplified for presentation; the actual code uses \texttt{f\_td\_mul}
+and \texttt{f\_td\_sub} calls.)  Cross-type conversions with
+\texttt{dd\_complex} and \texttt{qd\_complex} are provided via
+array-slice assignment (analogous to the real case), with
+appropriate zero-extension or truncation.
+
+The complex type overloads \texttt{conjg}, \texttt{aimag},
+\texttt{abs}, \texttt{exp}, and \texttt{log}, providing a
+complete complex arithmetic facility at triple-double precision.
+
+\subsection{Structural parity with \texttt{ddmod.f}}
+
+The \texttt{tdmod.f} module (1959 lines) was designed to be a
+structural clone of \texttt{ddmod.f} (2077 lines, by Hida and
+Bailey), with all \texttt{dd\_} prefixes replaced by \texttt{td\_}
+and array dimensions changed from 2 to 3.  The module follows the
+same organizational pattern: type definitions, then parameter
+constants, then interface blocks for assignment, arithmetic,
+comparison, intrinsics, and conversion, then the \texttt{CONTAINS}
+section with all procedure implementations.
+
+This structural parity has a practical benefit: existing Fortran
+codes using DD or QD arithmetic can be migrated to TD precision
+by a near-mechanical substitution of module names and type
+declarations, with minimal changes to the algorithmic code itself.
+
+
+\section{Operation Count Analysis}
+\label{sec:flops}
+
+This section provides a precise count of the binary64
+floating-point operations (additions, subtractions,
+multiplications, and FMA instructions, each counted as one
+operation) required for the addition and multiplication of DD, TD,
+and QD values.  The analysis is based on the actual inline
+implementations in the QD library source code.
+
+\subsection{Primitive costs}
+
+Table~\ref{tab:primitives} summarizes the cost of the error-free
+transformation primitives from Section~\ref{sec:eft}.
+
+\begin{table}[h]
+\centering
+\caption{Flop counts for EFT primitives.}
+\label{tab:primitives}
+\begin{tabular}{lcc}
+\toprule
+Primitive & No FMA & FMA \\
+\midrule
+\textsc{QuickTwoSum} & 3 & 3 \\
+\textsc{TwoSum} & 6 & 6 \\
+\textsc{TwoDiff} & 6 & 6 \\
+\textsc{TwoProd} & 17 & 2 \\
+\textsc{ThreeSum} ($= 3 \times \textsc{TwoSum}$) & 18 & 18 \\
+\textsc{ThreeSum2} ($= 2 \times \textsc{TwoSum} + 1$) & 13 & 13 \\
+\textsc{QuickThreeAccum} ($= 2 \times \textsc{TwoSum}$) & 12 & 12 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The \textsc{TwoProd} non-FMA cost of 17 flops comes from: $p = a
+\cdot b$ (1), two \textsc{Split} calls (4 each), and the error
+computation (8 flops: 4 multiplications $+$ 1 subtraction $+$ 3
+additions).  With FMA, this collapses to $p = a \cdot b$ (1) and
+$e = \mathrm{fma}(a, b, -p)$ (1).  This $17 \to 2$ reduction
+is the dominant factor in the FMA speedup of multiplication.
+
+The renormalization costs depend on the number of input
+components and on the branch path taken. Typical-path costs are:
+\textsc{Renorm3} = 6 (2 \textsc{QuickTwoSum}),
+\textsc{Renorm4} = 13 ($3 + 1$ \textsc{QuickTwoSum} $+$ 1 add),
+\textsc{Renorm5} = 19 ($4 + 2$ \textsc{QuickTwoSum} $+$ 1 add).
+
+\subsection{Addition}
+
+\begin{table}[h]
+\centering
+\caption{Flop counts for addition. FMA does not affect addition
+  because no \textsc{TwoProd} calls are involved.}
+\label{tab:add-flops}
+\begin{tabular}{lcl}
+\toprule
+Operation & Flops & Derivation \\
+\midrule
+DD$+$DD (sloppy, default)
+  & 11
+  & $1\,\textsc{TS} + 2\,\text{add} + 1\,\textsc{QTS}$ \\
+DD$+$DD (IEEE)
+  & 20
+  & $2\,\textsc{TS} + 2\,\text{add} + 2\,\textsc{QTS}$ \\
+TD$+$TD (IEEE)
+  & 53--66
+  & $1\,\textsc{QTS} + (3\text{--}4)\,\textsc{QTA}
+    + \text{left.} + \textsc{R4}$ \\
+TD$-$TD (dedicated)
+  & 56
+  & $3\,\textsc{TD} + 1\,\textsc{TS}
+    + 1\,\textsc{3S} + 1\,\text{add} + \textsc{R4}$ \\
+QD$+$QD (sloppy, default)
+  & 82
+  & $5\,\textsc{TS} + 1\,\textsc{3S} + 1\,\textsc{3S2}
+    + 2\,\text{add} + \textsc{R5}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+FMA has no effect on addition because the operation involves only
+\textsc{TwoSum}, \textsc{QuickTwoSum}, and their derivatives, none
+of which use multiplication.
+
+For TD$+$TD, the merge-based \texttt{ieee\_add} algorithm has
+data-dependent cost: if every \textsc{QuickThreeAccum} call emits
+a resolved word, 3 iterations suffice (53 flops); if one call
+absorbs without emitting, 4 iterations are needed (up to 66 flops).
+The TD$-$TD subtraction uses a deterministic component-wise
+\textsc{TwoDiff} algorithm at a fixed cost of~56.
+
+TD has no sloppy addition variant.  This is a deliberate design
+choice: the sloppy DD/QD algorithms lose roughly 1~bit of precision
+compared to the IEEE variants, and this relative loss is more
+significant for TD's 157-bit significand.
+
+\subsection{Multiplication}
+
+\begin{table}[h]
+\centering
+\caption{Flop counts for multiplication.}
+\label{tab:mul-flops}
+\begin{tabular}{lccl}
+\toprule
+Operation & No FMA & FMA & Derivation \\
+\midrule
+DD$\times$DD
+  & 24 & 9
+  & $1\,\textsc{TP} + 2\,\text{mul} + 2\,\text{add}
+    + 1\,\textsc{QTS}$ \\
+TD$\times$TD
+  & 203 & 113
+  & $6\,\textsc{TP} + 3\,\textsc{3S} + 4\,\textsc{TS}
+    + 10\,\text{flops} + \textsc{R5}$ \\
+QD$\times$QD (sloppy)
+  & 207 & 117
+  & $6\,\textsc{TP} + 3\,\textsc{3S} + 4\,\textsc{TS}
+    + 14\,\text{flops} + \textsc{R5}$ \\
+QD$\times$QD (accurate)
+  & 333 & 183
+  & $10\,\textsc{TP} + 3\,\textsc{3S} + 13\,\textsc{TS}
+    + 18\,\text{flops} + \textsc{R5}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Several observations:
+
+\begin{enumerate}
+\item The FMA speedup for multiplication is substantial: $2.7\times$
+  for DD, $1.8\times$ for TD and QD~sloppy.  The speedup factor
+  decreases with precision because the \textsc{TwoProd} cost
+  ($17 \to 2$) is diluted by the accumulation and renormalization
+  steps, which are FMA-independent.
+
+\item TD$\times$TD (203 flops) is remarkably close to QD$\times$QD
+  sloppy (207 flops).  The difference is only 4~flops, coming from
+  the higher-order terms: TD accumulates 2 cross-products ($a_1 b_2,
+  a_2 b_1$) and 4 error words ($q_0, q_3, q_4, q_5$) for 7~flops,
+  while QD~sloppy accumulates 4 cross-products ($a_0 b_3, a_1 b_2,
+  a_2 b_1, a_3 b_0$) and the same 4 error words for 11~flops.  The
+  six \textsc{TwoProd} calls and three \textsc{ThreeSum} calls are
+  \emph{identical} in both algorithms.
+
+\item The QD accurate multiplication costs $1.6\times$ more than
+  the sloppy variant (333 vs.\ 207 without FMA), primarily due to
+  4~additional \textsc{TwoProd} calls and 9~additional
+  \textsc{TwoSum} calls for the order-3 accumulation.
+
+\item The cost ratio TD/DD is approximately $8.5\times$ for
+  multiplication (without FMA), which is consistent with the
+  $\binom{3+1}{2} = 6$ cross-products needing full error tracking
+  vs.\ DD's single \textsc{TwoProd}.
+\end{enumerate}
+
+\subsection{Summary}
+
+Table~\ref{tab:summary-flops} provides a condensed comparison,
+using the default algorithm variants.
+
+\begin{table}[h]
+\centering
+\caption{Summary: flop counts for default add/multiply
+  (DD sloppy; TD IEEE; QD sloppy).}
+\label{tab:summary-flops}
+\begin{tabular}{lccccc}
+\toprule
+      & \multicolumn{2}{c}{Addition}
+      & \multicolumn{2}{c}{Multiplication}
+      & Precision \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+Type & No FMA & FMA & No FMA & FMA & (bits / digits) \\
+\midrule
+DD &  11 &  11 &  24 &   9 & 106 / 31 \\
+TD &  53--66 &  53--66 & 203 & 113 & 157 / 47 \\
+QD &  82 &  82 & 207 & 117 & 212 / 63 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The table reveals that TD provides $\approx 50\%$ more precision
+than DD at roughly $5\text{--}8.5\times$ the cost, while QD provides
+only $\approx 35\%$ more precision than TD at essentially the same
+multiplication cost (207 vs.~203).  For applications needing 40--50
+digits, TD is therefore the clear choice over QD in terms of
+cost-per-digit.
 
 
 \section{Conclusion}
 \label{sec:conclusion}
 
 We have described \texttt{td\_real}, a triple-double floating-point
-type providing $\approx 47$ decimal digits of precision at roughly
-60\% of the cost of quad-double arithmetic.  The implementation
-follows the proven algorithmic framework of the QD library---error-free
-transformations (\textsc{TwoSum}, \textsc{TwoProd}),
-renormalization, and Newton-based transcendental functions---adapted
-for a three-component representation.
+type providing $\approx 47$ decimal digits of precision ($\approx
+74\%$ of QD's 63 digits) at 62--65\% of the per-operation cost of
+quad-double arithmetic (Section~\ref{sec:cost}): TD addition
+costs 55~flops vs.\ QD's~84, and TD multiplication costs 116~flops
+(FMA) or 206~flops (no FMA) vs.\ QD's 182 or~332.  The
+implementation follows the proven algorithmic framework of the QD
+library---error-free transformations (\textsc{TwoSum},
+\textsc{TwoProd}), renormalization, and Newton-based transcendental
+functions---adapted for a three-component representation.
 
 Key design decisions include:
 \begin{itemize}
@@ -633,7 +1856,15 @@ Key design decisions include:
 \item Three-stage trigonometric argument reduction with precomputed
   $\sin/\cos$ tables at $\pi/16$ intervals.
 \item Cubic-convergent Newton iteration for $\log$ and $\mathrm{atan2}$.
-\item Full C and Fortran 90 interoperability layers.
+\item Consistent mixed-precision promotion rules: TD is closed under
+  double/DD/TD operations, while TD--QD operations promote to QD;
+  compound-assignment from QD performs the operation in QD and
+  truncates back to TD via renormalization.
+\item Full C and Fortran 90 interoperability via a three-layer
+  binding architecture (\texttt{tdmodule}$\to$\texttt{tdext}$\to$%
+  \texttt{f\_td.cpp}$\to$\texttt{td\_real}) mirroring the existing
+  DD and QD paths, with \texttt{td\_complex} support and
+  overloading of all standard Fortran intrinsics.
 \end{itemize}
 
 The source code is available under a BSD 2-clause license as part

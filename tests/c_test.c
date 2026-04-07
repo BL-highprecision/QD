@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <math.h>
+#include <qd/c_dd.h>
 #include <qd/c_qd.h>
+#include <qd/c_td.h>
 
 /* Test 1.  Salamin-Brent quadratically convergent formula for pi. */
 int test_1() {
@@ -67,7 +69,96 @@ int test_1() {
   return 0;
 }
 
+int test_2() {
+  double x[3], y[3], s[3], c[3], t[3], u[3];
+  int r;
+
+  puts("Test 2.  (Triple-double C wrapper smoke test)");
+
+  c_td_read("0.5", x);
+  c_td_sincos(x, s, c);
+  c_td_sqr(s, t);
+  c_td_sqr(c, u);
+  c_td_selfadd(u, t);
+  c_td_sub_td_d(t, 1.0, u);
+  c_td_abs(u, u);
+  c_td_comp_td_d(u, 1e-40, &r);
+  if (r > 0) {
+    puts("  sin^2 + cos^2 != 1");
+    return 1;
+  }
+
+  c_td_exp(x, y);
+  c_td_log(y, t);
+  c_td_sub(t, x, u);
+  c_td_abs(u, u);
+  c_td_comp_td_d(u, 1e-40, &r);
+  if (r > 0) {
+    puts("  log(exp(x)) too far from x");
+    return 1;
+  }
+
+  return 0;
+}
+
+int test_3() {
+  double dd[2], dd_out[2];
+  double td[3], td_out[3];
+  double qd[4], qd_out[4];
+  int r;
+
+  puts("Test 3.  (Cross-type C wrapper smoke test)");
+
+  c_dd_copy_d(1.25, dd);
+  c_td_copy_d(0.5, td);
+  c_qd_copy_d(2.0, qd);
+
+  c_dd_add_td_dd(td, dd, dd_out);
+  c_dd_comp_dd_d(dd_out, 1.75, &r);
+  if (r != 0) {
+    puts("  c_dd_add_td_dd failed");
+    return 1;
+  }
+
+  c_dd_add_qd_dd(qd, dd, dd_out);
+  c_dd_comp_dd_d(dd_out, 3.25, &r);
+  if (r != 0) {
+    puts("  c_dd_add_qd_dd failed");
+    return 1;
+  }
+
+  c_td_add_qd_td(qd, td, td_out);
+  c_td_comp_td_d(td_out, 2.5, &r);
+  if (r != 0) {
+    puts("  c_td_add_qd_td failed");
+    return 1;
+  }
+
+  c_td_copy_qd(qd, td_out);
+  c_td_comp_td_d(td_out, 2.0, &r);
+  if (r != 0) {
+    puts("  c_td_copy_qd failed");
+    return 1;
+  }
+
+  c_qd_add_td_qd(td, qd, qd_out);
+  c_qd_comp_qd_d(qd_out, 2.5, &r);
+  if (r != 0) {
+    puts("  c_qd_add_td_qd failed");
+    return 1;
+  }
+
+  c_qd_copy_td(td, qd_out);
+  c_qd_comp_qd_d(qd_out, 0.5, &r);
+  if (r != 0) {
+    puts("  c_qd_copy_td failed");
+    return 1;
+  }
+
+  return 0;
+}
+
 int main(void) {
   fpu_fix_start(NULL);
-  return test_1();
+  return test_1() || test_2() || test_3();
 }

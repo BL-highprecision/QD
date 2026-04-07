@@ -14,6 +14,8 @@
 
 #include "config.h"
 #include <qd/dd_real.h>
+#include <qd/td_real.h>
+#include <qd/qd_real.h>
 #include <qd/c_dd.h>
 
 #define TO_DOUBLE_PTR(a, ptr) ptr[0] = a.x[0]; ptr[1] = a.x[1];
@@ -36,6 +38,26 @@ void c_dd_add_d_dd(double a, const double *b, double *c) {
   cc = a + dd_real(b);
   TO_DOUBLE_PTR(cc, c);
 }
+void c_dd_add_dd_td(const double *a, const double *b, double *c) {
+  dd_real cc;
+  cc = dd_real(a) + to_dd_real(td_real(b));
+  TO_DOUBLE_PTR(cc, c);
+}
+void c_dd_add_td_dd(const double *a, const double *b, double *c) {
+  dd_real cc;
+  cc = to_dd_real(td_real(a)) + dd_real(b);
+  TO_DOUBLE_PTR(cc, c);
+}
+void c_dd_add_dd_qd(const double *a, const double *b, double *c) {
+  dd_real cc;
+  cc = dd_real(a) + to_dd_real(qd_real(b));
+  TO_DOUBLE_PTR(cc, c);
+}
+void c_dd_add_qd_dd(const double *a, const double *b, double *c) {
+  dd_real cc;
+  cc = to_dd_real(qd_real(a)) + dd_real(b);
+  TO_DOUBLE_PTR(cc, c);
+}
 
 
 /* sub */
@@ -52,6 +74,26 @@ void c_dd_sub_dd_d(const double *a, double b, double *c) {
 void c_dd_sub_d_dd(double a, const double *b, double *c) {
   dd_real cc;
   cc = a - dd_real(b);
+  TO_DOUBLE_PTR(cc, c);
+}
+void c_dd_sub_dd_td(const double *a, const double *b, double *c) {
+  dd_real cc;
+  cc = dd_real(a) - to_dd_real(td_real(b));
+  TO_DOUBLE_PTR(cc, c);
+}
+void c_dd_sub_td_dd(const double *a, const double *b, double *c) {
+  dd_real cc;
+  cc = to_dd_real(td_real(a)) - dd_real(b);
+  TO_DOUBLE_PTR(cc, c);
+}
+void c_dd_sub_dd_qd(const double *a, const double *b, double *c) {
+  dd_real cc;
+  cc = dd_real(a) - to_dd_real(qd_real(b));
+  TO_DOUBLE_PTR(cc, c);
+}
+void c_dd_sub_qd_dd(const double *a, const double *b, double *c) {
+  dd_real cc;
+  cc = to_dd_real(qd_real(a)) - dd_real(b);
   TO_DOUBLE_PTR(cc, c);
 }
 
@@ -72,6 +114,26 @@ void c_dd_mul_d_dd(double a, const double *b, double *c) {
   cc = a * dd_real(b);
   TO_DOUBLE_PTR(cc, c);
 }
+void c_dd_mul_dd_td(const double *a, const double *b, double *c) {
+  dd_real cc;
+  cc = dd_real(a) * to_dd_real(td_real(b));
+  TO_DOUBLE_PTR(cc, c);
+}
+void c_dd_mul_td_dd(const double *a, const double *b, double *c) {
+  dd_real cc;
+  cc = to_dd_real(td_real(a)) * dd_real(b);
+  TO_DOUBLE_PTR(cc, c);
+}
+void c_dd_mul_dd_qd(const double *a, const double *b, double *c) {
+  dd_real cc;
+  cc = dd_real(a) * to_dd_real(qd_real(b));
+  TO_DOUBLE_PTR(cc, c);
+}
+void c_dd_mul_qd_dd(const double *a, const double *b, double *c) {
+  dd_real cc;
+  cc = to_dd_real(qd_real(a)) * dd_real(b);
+  TO_DOUBLE_PTR(cc, c);
+}
 
 
 /* div */
@@ -90,6 +152,26 @@ void c_dd_div_d_dd(double a, const double *b, double *c) {
   cc = a / dd_real(b);
   TO_DOUBLE_PTR(cc, c);
 }
+void c_dd_div_dd_td(const double *a, const double *b, double *c) {
+  dd_real cc;
+  cc = dd_real(a) / to_dd_real(td_real(b));
+  TO_DOUBLE_PTR(cc, c);
+}
+void c_dd_div_td_dd(const double *a, const double *b, double *c) {
+  dd_real cc;
+  cc = to_dd_real(td_real(a)) / dd_real(b);
+  TO_DOUBLE_PTR(cc, c);
+}
+void c_dd_div_dd_qd(const double *a, const double *b, double *c) {
+  dd_real cc;
+  cc = dd_real(a) / to_dd_real(qd_real(b));
+  TO_DOUBLE_PTR(cc, c);
+}
+void c_dd_div_qd_dd(const double *a, const double *b, double *c) {
+  dd_real cc;
+  cc = to_dd_real(qd_real(a)) / dd_real(b);
+  TO_DOUBLE_PTR(cc, c);
+}
 
 
 /* copy */
@@ -97,9 +179,81 @@ void c_dd_copy(const double *a, double *b) {
   b[0] = a[0];
   b[1] = a[1];
 }
+void c_dd_copy_td(const double *a, double *b) {
+  dd_real bb = to_dd_real(td_real(a));
+  TO_DOUBLE_PTR(bb, b);
+}
+void c_dd_copy_qd(const double *a, double *b) {
+  dd_real bb = to_dd_real(qd_real(a));
+  TO_DOUBLE_PTR(bb, b);
+}
 void c_dd_copy_d(double a, double *b) {
   b[0] = a;
   b[1] = 0.0;
+}
+
+void c_dd_selfadd_td(const double *a, double *b) {
+  dd_real bb(b);
+  bb += to_dd_real(td_real(a));
+  TO_DOUBLE_PTR(bb, b);
+}
+void c_dd_selfadd_qd(const double *a, double *b) {
+  dd_real bb(b);
+  bb += to_dd_real(qd_real(a));
+  TO_DOUBLE_PTR(bb, b);
+}
+void c_dd_selfadd_d(double a, double *b) {
+  dd_real bb(b);
+  bb += a;
+  TO_DOUBLE_PTR(bb, b);
+}
+
+void c_dd_selfsub_td(const double *a, double *b) {
+  dd_real bb(b);
+  bb -= to_dd_real(td_real(a));
+  TO_DOUBLE_PTR(bb, b);
+}
+void c_dd_selfsub_qd(const double *a, double *b) {
+  dd_real bb(b);
+  bb -= to_dd_real(qd_real(a));
+  TO_DOUBLE_PTR(bb, b);
+}
+void c_dd_selfsub_d(double a, double *b) {
+  dd_real bb(b);
+  bb -= a;
+  TO_DOUBLE_PTR(bb, b);
+}
+
+void c_dd_selfmul_td(const double *a, double *b) {
+  dd_real bb(b);
+  bb *= to_dd_real(td_real(a));
+  TO_DOUBLE_PTR(bb, b);
+}
+void c_dd_selfmul_qd(const double *a, double *b) {
+  dd_real bb(b);
+  bb *= to_dd_real(qd_real(a));
+  TO_DOUBLE_PTR(bb, b);
+}
+void c_dd_selfmul_d(double a, double *b) {
+  dd_real bb(b);
+  bb *= a;
+  TO_DOUBLE_PTR(bb, b);
+}
+
+void c_dd_selfdiv_td(const double *a, double *b) {
+  dd_real bb(b);
+  bb /= to_dd_real(td_real(a));
+  TO_DOUBLE_PTR(bb, b);
+}
+void c_dd_selfdiv_qd(const double *a, double *b) {
+  dd_real bb(b);
+  bb /= to_dd_real(qd_real(a));
+  TO_DOUBLE_PTR(bb, b);
+}
+void c_dd_selfdiv_d(double a, double *b) {
+  dd_real bb(b);
+  bb /= a;
+  TO_DOUBLE_PTR(bb, b);
 }
 
 
@@ -304,6 +458,46 @@ void c_dd_comp_d_dd(double a, const double *b, int *result) {
   else if (aa > bb)
     *result = 1;
   else 
+    *result = 0;
+}
+
+void c_dd_comp_dd_td(const double *a, const double *b, int *result) {
+  dd_real aa(a), bb = to_dd_real(td_real(b));
+  if (aa < bb)
+    *result = -1;
+  else if (aa > bb)
+    *result = 1;
+  else
+    *result = 0;
+}
+
+void c_dd_comp_td_dd(const double *a, const double *b, int *result) {
+  dd_real aa = to_dd_real(td_real(a)), bb(b);
+  if (aa < bb)
+    *result = -1;
+  else if (aa > bb)
+    *result = 1;
+  else
+    *result = 0;
+}
+
+void c_dd_comp_dd_qd(const double *a, const double *b, int *result) {
+  dd_real aa(a), bb = to_dd_real(qd_real(b));
+  if (aa < bb)
+    *result = -1;
+  else if (aa > bb)
+    *result = 1;
+  else
+    *result = 0;
+}
+
+void c_dd_comp_qd_dd(const double *a, const double *b, int *result) {
+  dd_real aa = to_dd_real(qd_real(a)), bb(b);
+  if (aa < bb)
+    *result = -1;
+  else if (aa > bb)
+    *result = 1;
+  else
     *result = 0;
 }
 

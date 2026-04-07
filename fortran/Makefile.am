@@ -5,28 +5,36 @@ LDADD=libqdmod.la libqd_f_main.la $(top_builddir)/src/libqd.la $(FCLIBS)
 if UPCASE_MODULE
 DDEXT=DDEXT.$(module_ext)
 QDEXT=QDEXT.$(module_ext)
+TDEXT=TDEXT.$(module_ext)
 QDMOD=QDMODULE.$(module_ext)
+TDMOD=TDMODULE.$(module_ext)
 DDMOD=DDMODULE.$(module_ext)
 else
 DDEXT=ddext.$(module_ext)
 QDEXT=qdext.$(module_ext)
+TDEXT=tdext.$(module_ext)
 QDMOD=qdmodule.$(module_ext)
+TDMOD=tdmodule.$(module_ext)
 DDMOD=ddmodule.$(module_ext)
 endif
 
 lib_LTLIBRARIES = libqdmod.la libqd_f_main.la
-libqdmod_la_SOURCES = ddext.f ddmod.f qdext.f qdmod.f f_dd.cpp f_qd.cpp
+libqdmod_la_SOURCES = ddext.f ddmod.f qdext.f qdmod.f tdext.f tdmod.f \
+                      f_dd.cpp f_qd.cpp f_td.cpp
 libqdmod_la_LIBADD = $(top_builddir)/src/libqd.la $(FCLIBS)
 libqd_f_main_la_SOURCES = main.cpp
 libqd_f_main_la_LIBADD = $(top_builddir)/src/libqd.la libqdmod.la $(FCLIBS)
 ddmod.lo: $(DDEXT) ddext.lo
 qdmod.lo: ddmod.lo $(DDMOD) qdext.lo
+tdmod.lo: qdmod.lo $(QDMOD) tdext.lo
 $(QDMOD): qdmod.lo $(DDMOD)
+$(TDMOD): tdmod.lo $(QDMOD)
 $(DDMOD): ddmod.lo
 $(DDEXT): ddext.lo
 $(QDEXT): qdext.lo $(DDEXT)
+$(TDEXT): tdext.lo $(QDEXT)
 
-nodist_pkginclude_HEADERS = $(QDMOD) $(QDEXT) $(DDMOD) $(DDEXT)
+nodist_pkginclude_HEADERS = $(TDMOD) $(TDEXT) $(QDMOD) $(QDEXT) $(DDMOD) $(DDEXT)
 
 DEMO=quaderq$(EXEEXT) quadgsq2d$(EXEEXT) quadgsq$(EXEEXT) \
      quadtsq$(EXEEXT) quadtsq2d$(EXEEXT)
@@ -79,4 +87,3 @@ qd_timer.f: zz_timer.f
 if HAVE_FORTRAN
 .PHONY: demo
 endif
-

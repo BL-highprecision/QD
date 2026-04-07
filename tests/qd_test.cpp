@@ -18,6 +18,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <sstream>
+#include <vector>
 #include <qd/qd_real.h>
 #include <qd/td_real.h>
 #include <qd/inline.h>
@@ -64,6 +65,29 @@ public:
 template <class T>
 const int TestSuite<T>::double_digits = 6;
 
+td_real polyeval(const td_real *c, int n, const td_real &x) {
+  std::vector<qd_real> qc(n + 1);
+
+  for (int i = 0; i <= n; i++) {
+    qc[i] = to_qd_real(c[i]);
+  }
+
+  qd_real y = ::polyeval(qc.data(), n, to_qd_real(x));
+  return to_td_real(y);
+}
+
+td_real polyroot(const td_real *c, int n, const td_real &x0,
+    int max_iter = 64, double thresh = 0.0) {
+  std::vector<qd_real> qc(n + 1);
+
+  for (int i = 0; i <= n; i++) {
+    qc[i] = to_qd_real(c[i]);
+  }
+
+  qd_real x = ::polyroot(qc.data(), n, to_qd_real(x0), max_iter, thresh);
+  return to_td_real(x);
+}
+
 namespace {
 
 qd_real td_to_qd(const td_real &a) {
@@ -96,27 +120,32 @@ bool td_check_close(const td_real &a, const qd_real &ref, double factor) {
   return td_abs_error(a, ref) <= factor * td_real::_eps * td_scale(ref);
 }
 
+// RAII guard for td_suppress_error_messages.
+struct SuppressGuard {
+  ~SuppressGuard() { td_suppress_error_messages = false; }
+};
+
 class TdTestSuite {
 public:
-  bool test1();
-  bool test2();
-  bool test3();
-  bool test4();
-  bool test5();
-  bool test6();
-  bool test7();
-  bool test8();
   bool test9();
   bool test10();
   bool test11();
   bool test12();
   bool test13();
+  bool test14();
+  bool test15();
+  bool test16();
+  bool test17();
+  bool test18();
+  bool test19();
+  bool test20();
+  bool test21();
   bool testall();
 };
 
-bool TdTestSuite::test1() {
+bool TdTestSuite::test9() {
   cout << endl;
-  cout << "Test 1.  (Normalization invariants after arithmetic)." << endl;
+  cout << "Test 9.  (Normalization invariants after arithmetic)." << endl;
 
   td_real a("1.2345678901234567890123456789012345678901");
   td_real b("9.8765432109876543210987654321098765432109e-40");
@@ -142,9 +171,9 @@ bool TdTestSuite::test1() {
   return pass;
 }
 
-bool TdTestSuite::test2() {
+bool TdTestSuite::test10() {
   cout << endl;
-  cout << "Test 2.  (Cancellation-sensitive addition / subtraction)." << endl;
+  cout << "Test 10.  (Cancellation-sensitive addition / subtraction)." << endl;
 
   const char *sa = "1.0000000000000002220446049250313080847263336181640625";
   const char *sb = "1.00000000000000011102230246251565404236316680908203125";
@@ -168,9 +197,9 @@ bool TdTestSuite::test2() {
   return pass;
 }
 
-bool TdTestSuite::test3() {
+bool TdTestSuite::test11() {
   cout << endl;
-  cout << "Test 3.  (Multiplication across mixed magnitudes)." << endl;
+  cout << "Test 11.  (Multiplication across mixed magnitudes)." << endl;
 
   const char *sa = "1.2345678901234567890123456789012345678901e150";
   const char *sb = "9.8765432109876543210987654321098765432109e-120";
@@ -187,9 +216,9 @@ bool TdTestSuite::test3() {
   return td_check_close(prod, qprod, 64.0);
 }
 
-bool TdTestSuite::test4() {
+bool TdTestSuite::test12() {
   cout << endl;
-  cout << "Test 4.  (Division sanity checks)." << endl;
+  cout << "Test 12.  (Division sanity checks)." << endl;
 
   const char *sa = "1.2345678901234567890123456789012345678901e120";
   const char *sb = "9.8765432109876543210987654321098765432109e30";
@@ -212,9 +241,9 @@ bool TdTestSuite::test4() {
   return pass;
 }
 
-bool TdTestSuite::test5() {
+bool TdTestSuite::test13() {
   cout << endl;
-  cout << "Test 5.  (sqrt on exact squares and values near 1)." << endl;
+  cout << "Test 13.  (sqrt on exact squares and values near 1)." << endl;
 
   td_real square("15241578750190521");
   td_real exact = sqrt(square);
@@ -234,9 +263,9 @@ bool TdTestSuite::test5() {
   return pass;
 }
 
-bool TdTestSuite::test6() {
+bool TdTestSuite::test14() {
   cout << endl;
-  cout << "Test 6.  (Parse / format round trips)." << endl;
+  cout << "Test 14.  (Parse / format round trips)." << endl;
 
   const char *samples[] = {
     "3.1415926535897932384626433832795028841971693993751",
@@ -264,9 +293,9 @@ bool TdTestSuite::test6() {
   return pass;
 }
 
-bool TdTestSuite::test7() {
+bool TdTestSuite::test15() {
   cout << endl;
-  cout << "Test 7.  (Transcendental identity checks)." << endl;
+  cout << "Test 15.  (Transcendental identity checks)." << endl;
 
   td_real x("1.234567890123456789");
   td_real y("0.625");
@@ -295,9 +324,9 @@ bool TdTestSuite::test7() {
   return pass;
 }
 
-bool TdTestSuite::test8() {
+bool TdTestSuite::test16() {
   cout << endl;
-  cout << "Test 8.  (Random-value qd oracle comparison)." << endl;
+  cout << "Test 16.  (Random-value qd oracle comparison)." << endl;
 
   bool pass = true;
   std::srand(12345);
@@ -319,9 +348,9 @@ bool TdTestSuite::test8() {
   return pass;
 }
 
-bool TdTestSuite::test9() {
+bool TdTestSuite::test17() {
   cout << endl;
-  cout << "Test 9.  (Boundary-value checks)." << endl;
+  cout << "Test 17.  (Boundary-value checks)." << endl;
 
   td_real root_max = sqrt(td_real::_max);
   td_real log_min = log(td_real(td_real::_min_normalized));
@@ -345,9 +374,9 @@ bool TdTestSuite::test9() {
   return pass;
 }
 
-bool TdTestSuite::test10() {
+bool TdTestSuite::test18() {
   cout << endl;
-  cout << "Test 10.  (Mixed-mode arithmetic and conversion round trips)." << endl;
+  cout << "Test 18.  (Mixed-mode arithmetic and conversion round trips)." << endl;
 
   dd_real dd("1.234567890123456789012345678901");
   td_real td("9.876543210987654321098765432109e-10");
@@ -369,7 +398,7 @@ bool TdTestSuite::test10() {
   qd_real qd_self("1.25");
   td_real td_half("0.5");
   qd_real qd_half("0.5");
-  qd_real td_self_ref = qd_real(dd) + qd_real("0.75");
+  qd_real dd_add_ref = qd_real(dd) + qd_real("0.75");
   qd_real qd_self_ref("0.875");
 
   bool pass = true;
@@ -392,7 +421,7 @@ bool TdTestSuite::test10() {
   qd_self *= td_half;
 
   pass &= abs(to_double(qd_real(dd_self) - qd_real("0.875"))) < 32.0 * dd_real::_eps;
-  pass &= td_check_close(td_self, td_self_ref, 64.0);
+  pass &= td_check_close(td_self, dd_add_ref, 64.0);
   pass &= to_double(abs(qd_self - qd_self_ref)) < 64.0 * td_real::_eps * td_scale(qd_self_ref);
   pass &= (td < qd);
   pass &= (qd > td);
@@ -406,17 +435,17 @@ bool TdTestSuite::test10() {
   return pass;
 }
 
-bool TdTestSuite::test11() {
+bool TdTestSuite::test19() {
   cout << endl;
-  cout << "Test 11.  (Special values and string robustness)." << endl;
+  cout << "Test 19.  (Special values and string robustness)." << endl;
 
   td_real nan_value("nan");
   td_real inf_value("inf");
   td_real neg_inf("-inf");
   td_real neg_one("-1.0");
   td_suppress_error_messages = true;
+  SuppressGuard suppress_guard;
   td_real log_nan = log(neg_one);
-  td_suppress_error_messages = false;
 
   td_real a("12345.678901234567890123456789");
   std::ostringstream sci;
@@ -447,9 +476,9 @@ bool TdTestSuite::test11() {
   return pass;
 }
 
-bool TdTestSuite::test12() {
+bool TdTestSuite::test20() {
   cout << endl;
-  cout << "Test 12.  (Deterministic transcendental spot and edge cases)." << endl;
+  cout << "Test 20.  (Deterministic transcendental spot and edge cases)." << endl;
 
   td_real pos_zero(0.0);
   td_real neg_zero(-0.0);
@@ -497,9 +526,9 @@ bool TdTestSuite::test12() {
   return pass;
 }
 
-bool TdTestSuite::test13() {
+bool TdTestSuite::test21() {
   cout << endl;
-  cout << "Test 13.  (Randomized native transcendental regression checks)." << endl;
+  cout << "Test 21.  (Randomized native transcendental regression checks)." << endl;
 
   bool pass = true;
   std::srand(24680);
@@ -538,19 +567,19 @@ bool TdTestSuite::test13() {
 
 bool TdTestSuite::testall() {
   bool pass = true;
-  pass &= print_result(test1());
-  pass &= print_result(test2());
-  pass &= print_result(test3());
-  pass &= print_result(test4());
-  pass &= print_result(test5());
-  pass &= print_result(test6());
-  pass &= print_result(test7());
-  pass &= print_result(test8());
   pass &= print_result(test9());
   pass &= print_result(test10());
   pass &= print_result(test11());
   pass &= print_result(test12());
   pass &= print_result(test13());
+  pass &= print_result(test14());
+  pass &= print_result(test15());
+  pass &= print_result(test16());
+  pass &= print_result(test17());
+  pass &= print_result(test18());
+  pass &= print_result(test19());
+  pass &= print_result(test20());
+  pass &= print_result(test21());
   return pass;
 }
 
@@ -563,14 +592,14 @@ bool TestSuite<T>::test1() {
   cout << "Test 1.  (Polynomial)." << endl;
 
   static const int n = 8;
-  T *c = new T[n];
+  std::vector<T> c(n);
   T x, y;
 
   for (int i = 0; i < n; i++)
     c[i] = static_cast<double>(i+1);
 
-  x = polyroot(c, n-1, T(0.0));
-  y = polyeval(c, n-1, x);
+  x = polyroot(c.data(), n-1, T(0.0));
+  y = polyeval(c.data(), n-1, x);
 
   if (flag_verbose) {
     cout.precision(T::_ndigits);
@@ -578,7 +607,6 @@ bool TestSuite<T>::test1() {
     cout << "           p(x) = " << y << endl;
   }
 
-  delete [] c;
   return (to_double(y) < 4.0 * T::_eps);
 }
 
@@ -588,7 +616,7 @@ bool TestSuite<T>::test2() {
 
   cout << endl;
   cout << "Test 2.  (Machin's Formula for Pi)." << endl;
-  
+
   /* Use the Machin's arctangent formula:
 
        pi / 4  =  4 arctan(1/5) - arctan(1/239)
@@ -741,7 +769,7 @@ bool TestSuite<T>::test4() {
     r = nroot(1.0 - sqr(sqr(y)), 4);
     y = (1.0 - r) / (1.0 + r);
     a = a * sqr(sqr(1.0 + y)) - m * y * (1.0 + y + sqr(y));
-    
+
     p_old = p;
     p = 1.0 / a;
     if (flag_verbose)
@@ -755,7 +783,7 @@ bool TestSuite<T>::test4() {
     cout << "         _pi: " << T::_pi << endl;
     cout.precision(double_digits);
     cout << "       error: " << err << " = " << err / T::_eps << " eps" << endl;
-  }  
+  }
 
   return (err < 256.0 * T::_eps);
 }
@@ -819,7 +847,7 @@ bool TestSuite<T>::test6() {
   T t = 0.5;
   double delta;
   double n = 1.0;
-  double i = 0;
+  int i = 0;
 
   while (abs(t) > T::_eps) {
     i++;
@@ -835,7 +863,7 @@ bool TestSuite<T>::test6() {
     cout << "_log2 = " << T::_log2 << endl;
 
     cout.precision(double_digits);
-    cout << "error = " << delta << " = " << (delta / T::_eps) 
+    cout << "error = " << delta << " = " << (delta / T::_eps)
          << " eps" << endl;
     cout << i << " iterations." << endl;
   }
@@ -947,11 +975,11 @@ void print_usage() {
   cout << "  -all      Perform double-double, triple-double, and quad-double tests." << endl;
   cout << "  -v" << endl;
   cout << "  -verbose  Print detailed information for each test." << endl;
-  
+
 }
 
 int main(int argc, char *argv[]) {
-  
+
   bool pass = true;
   unsigned int old_cw;
   fpu_fix_start(&old_cw);
@@ -1006,15 +1034,17 @@ int main(int argc, char *argv[]) {
   }
 
   if (flag_test_td) {
+    TestSuite<td_real> td_base_test;
     TdTestSuite td_test;
 
     cout << endl;
     cout << "Testing td_real ..." << endl;
     if (flag_verbose)
       cout << "sizeof(td_real) = " << sizeof(td_real) << endl;
+    pass &= td_base_test.testall();
     pass &= td_test.testall();
   }
-  
+
   fpu_fix_end(&old_cw);
   return (pass ? 0 : 1);
 }

@@ -637,8 +637,10 @@ rescaling guarantees.
 
 \subsection{TD $\div$ TD}
 
-The algorithm is similar, but each quotient-digit refinement uses
-a full TD$\times$double multiplication for residual computation:
+The algorithm extracts quotient digits by Newton-style residual
+correction, with each refinement step using a full TD$\times$double
+multiplication and a full TD$-$TD subtraction.  Two variants are
+provided, distinguished only by the number of correction iterations:
 \begin{algorithmic}[1]
 \Require $b \ne 0$
 \State Apply rescaling if $|a_0| > 2^{969}$
@@ -647,12 +649,36 @@ a full TD$\times$double multiplication for residual computation:
 \State $q_1 \gets r_0 / b_0$
 \State $r \gets r - b \cdot q_1$
 \State $q_2 \gets r_0 / b_0$
-\State \textsc{Renorm3}$(q_0, q_1, q_2)$
+\If{accurate variant}
+  \State $r \gets r - b \cdot q_2$
+  \State $q_3 \gets r_0 / b_0$
+  \State \textsc{Renorm4to3}$(q_0, q_1, q_2, q_3)$
+\Else
+  \State \textsc{Renorm3}$(q_0, q_1, q_2)$
+\EndIf
 \State Apply inverse rescaling if needed
 \State \Return $(q_0, q_1, q_2)$
 \end{algorithmic}
-Three quotient digits suffice because each iteration captures
-$\approx 53$ new bits; three iterations yield $\approx 159$ bits.
+Three quotient digits already saturate the three-component
+representation: each iteration captures $\approx 53$ new bits, and
+three iterations yield $\approx 159$ bits, matching the
+$\approx \varepsilon^3$ relative accuracy target.  The accurate
+variant performs a fourth scalar division and one additional
+TD$-$TD subtraction, giving roughly one extra guard bit in the
+least-significant component---valuable when the result is then fed
+into a long chain of further operations.
+
+This sloppy/accurate split mirrors the
+\texttt{qd\_real::\{sloppy,accurate\}\_div} convention, where sloppy
+runs four iterations and accurate runs five.  Notably, an earlier
+TD implementation tried a different notion of ``sloppy'' that
+replaced the residual TD$-$TD subtraction with a cheap
+\textsc{TwoDiff}-plus-scalar chain.  This is unsound at three
+components: collapsing the residual to two scalars discards exactly
+the information needed to extract $q_2$ at $O(\varepsilon^3)$, and
+the result silently degrades to DD precision.  The current
+implementation therefore uses full TD$-$TD subtractions in both
+variants.
 
 
 \section{Computational Cost Analysis}
@@ -698,10 +724,10 @@ TD$-$TD & accurate & 58 & 58 & 0
   & $3\,\text{TD}+1\,\text{TS}+1\,\text{3S}+1+\text{renorm4}$ \\
 TD$\times$TD & ---$\,\star$ & 116 & 206 & 6
   & $6\,\text{TP}+3\,\text{3S}+3\,\text{TS}+8+\text{renorm5}$ \\
-TD$\div$TD & accurate$\,\star$ & $3\text{d}+158$ & $3\text{d}+248$ & 6
+TD$\div$TD & accurate$\,\star$ & $4\text{d}+240$ & $4\text{d}+375$ & 9
+  & $3\times(\text{TD}{\times}\text{d}+\text{TD}{\text{-}}\text{TD})+\text{rn4}$ \\
+TD$\div$TD & sloppy & $3\text{d}+158$ & $3\text{d}+248$ & 6
   & $2\times(\text{TD}{\times}\text{d}+\text{TD}{\text{-}}\text{TD})+\text{rn3}$ \\
-TD$\div$TD & sloppy & $3\text{d}+96$ & $3\text{d}+186$ & 6
-  & $2\times(\text{TD}{\times}\text{d}+\text{TwoDiff}+\text{4})+\text{rn3}$ \\
 \midrule
 QD$+$QD & sloppy$\,\star$ & 84 & 84 & 0
   & $5\,\text{TS}+1\,\text{3S}+1\,\text{3S2}+2+\text{renorm5}$ \\
@@ -743,11 +769,25 @@ Several observations are noteworthy:
   emits a resolved word only when the running pair $(u, v)$ in
   \textsc{QuickThreeAccum} is fully occupied.
 
-\item TD \texttt{sloppy\_div} saves 62~flops vs.\
-  \texttt{accurate\_div} by replacing each full TD$-$TD subtraction
-  (41~flops) in the residual computation with a \textsc{TwoDiff} +
-  scalar chain ($\approx$10~flops).  The cost reduction is 39\%
-  with FMA ($3\text{d}+96$ vs.\ $3\text{d}+158$).
+\item TD \texttt{sloppy\_div} and \texttt{accurate\_div} differ in the
+  \emph{number of correction iterations}, not in the cost of each
+  residual: both perform full TD$-$TD subtractions when forming
+  $r \gets r - b\cdot q_k$, mirroring the
+  \texttt{qd\_real::\{sloppy,accurate\}\_div} convention.
+  \texttt{sloppy\_div} runs three iterations ($q_0,q_1,q_2$) and
+  delivers $\approx \varepsilon^3$ relative accuracy, which is the
+  minimum needed to fill the three TD components;
+  \texttt{accurate\_div} runs a fourth iteration ($q_3$) before the
+  final \textsc{Renorm4}$\to$3, gaining $\approx 1$~bit of guard
+  precision in the least-significant component.  An earlier attempt
+  to make \texttt{sloppy\_div} cheaper by replacing the residual
+  TD$-$TD subtraction with a \textsc{TwoDiff} + scalar chain was
+  abandoned: collapsing the residual to two scalars discards the
+  information needed to extract $q_2$ at $O(\varepsilon^3)$, and the
+  result degrades to DD precision.  The cost of the extra iteration
+  is one additional TD$\times$double, one TD$-$TD subtraction, one
+  scalar division, and \textsc{Renorm4}$\to$3 in place of
+  \textsc{Renorm3}.
 
 \item TD$\times$TD and QD$\times$QD \texttt{sloppy\_mul} have the
   same structure (6 \textsc{TwoProd} + 3 \textsc{ThreeSum}), but

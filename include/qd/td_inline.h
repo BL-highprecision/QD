@@ -584,13 +584,66 @@ inline qd_real operator/(const qd_real &a, const td_real &b) {
   return a / td::to_qd_conversion(b);
 }
 
-/* Accurate division: uses full TD*double and TD-TD subtraction for residuals.
-   Cost: 3 div + 2 x (TD*double + TD-TD sub) + renorm3
-       = 3 div + 6 TP + 2*(29 + sub) + 6,
-   where sub = 41 (sloppy, default) or 58 (accurate, QD_IEEE_ADD).
-   Default: 3 div + 6TP + 146.
-   FMA: 3 div + 158.  No FMA: 3 div + 248. */
+/* Triple-double division.
+ *
+ * Both variants follow the same long-division scheme as qd_real:
+ * extract one quotient digit, subtract  b * q_k  from the running
+ * residual, repeat.  Each TD-TD subtraction is performed in full
+ * accurate_div extracts FOUR quotient digits and folds the last one
+ * back via a 4-to-3 renormalization, mirroring qd_real::accurate_div.
+ * This guards the lowest bit of the result.
+ *
+ * sloppy_div extracts only THREE digits, mirroring
+ * qd_real::sloppy_div.  It saves 1 scalar division, 1 TD*double,
+ * 1 TD-TD subtraction, and replaces renorm4 with renorm3.
+ *
+ * Cost (with TP = 2 flops with FMA, 17 without; TD*double = 3 TP + 29
+ * scalar; TD-TD sub = 41 sloppy / 58 IEEE; renorm3 = 6, renorm4 = 12):
+ *
+ *   accurate_div = 4 div + 3 (TD*double) + 3 (TD-TD sub) + renorm4
+ *                = 4 div + 9 TP + 3*29 + 3*41 + 12
+ *                = 4 div + 9 TP + 222         (default sloppy sub)
+ *                FMA:    4 div + 240
+ *                No FMA: 4 div + 375
+ *
+ *   sloppy_div   = 3 div + 2 (TD*double) + 2 (TD-TD sub) + renorm3
+ *                = 3 div + 6 TP + 2*29 + 2*41 + 6
+ *                = 3 div + 6 TP + 146         (default sloppy sub)
+ *                FMA:    3 div + 158
+ *                No FMA: 3 div + 248
+ *
+ * Selecting QD_IEEE_ADD raises the TD-TD sub cost from 41 to 58,
+ * adding 51 (accurate) or 34 (sloppy) flops respectively.
+ */
 inline td_real td_real::accurate_div(const td_real &a, const td_real &b) {
+  double q0, q1, q2, q3;
+  td_real r;
+
+  if (b.is_zero()) {
+    td_real::error("(td_real::operator/): Division by zero.");
+    return td_real::_nan;
+  }
+
+  const bool rescale = td::div_needs_rescale(a[0]);
+  const td_real aa = rescale ? mul_pwr2(a, 0x1p-53) : a;
+
+  q0 = aa[0] / b[0];
+  r  = aa - b * q0;
+
+  q1 = r[0] / b[0];
+  r -= b * q1;
+
+  q2 = r[0] / b[0];
+  r -= b * q2;
+
+  q3 = r[0] / b[0];           /* guard digit */
+
+  td::renorm(q0, q1, q2, q3); /* 4-to-3 renormalization */
+  td_real result(q0, q1, q2);
+  return rescale ? mul_pwr2(result, 0x1p+53) : result;
+}
+
+inline td_real td_real::sloppy_div(const td_real &a, const td_real &b) {
   double q0, q1, q2;
   td_real r;
 
@@ -603,50 +656,12 @@ inline td_real td_real::accurate_div(const td_real &a, const td_real &b) {
   const td_real aa = rescale ? mul_pwr2(a, 0x1p-53) : a;
 
   q0 = aa[0] / b[0];
-  r = aa - b * q0;
+  r  = aa - b * q0;
 
   q1 = r[0] / b[0];
   r -= b * q1;
 
   q2 = r[0] / b[0];
-
-  td::renorm(q0, q1, q2);
-  td_real result(q0, q1, q2);
-  return rescale ? mul_pwr2(result, 0x1p+53) : result;
-}
-
-/* Sloppy division: uses cheap scalar residual instead of full TD-TD sub.
-   Cost: 3 div + 2 x TD*double + 2 x (TwoDiff + ~4 scalar) + 1 add + renorm3
-       = 3 div + 6 TP + 58 + 10 + 9 + 1 + 6 = 3 div + 6 TP + 84.
-   FMA: 3 div + 96.  No FMA: 3 div + 186. */
-inline td_real td_real::sloppy_div(const td_real &a, const td_real &b) {
-  double q0, q1, q2;
-  double s0, s1, t0;
-
-  if (b.is_zero()) {
-    td_real::error("(td_real::operator/): Division by zero.");
-    return td_real::_nan;
-  }
-
-  const bool rescale = td::div_needs_rescale(a[0]);
-  const td_real aa = rescale ? mul_pwr2(a, 0x1p-53) : a;
-
-  q0 = aa[0] / b[0];
-
-  /* Residual r = aa - b*q0 (sloppy: TwoDiff for leading term,
-     plain subtraction for lower terms). */
-  td_real p = b * q0;
-  s0 = qd::two_diff(aa[0], p[0], t0);
-  s1 = (aa[1] - p[1]) + (aa[2] - p[2]) + t0;
-
-  q1 = s0 / b[0];
-
-  /* Second residual r -= b*q1 (sloppy). */
-  p = b * q1;
-  s0 = qd::two_diff(s0, p[0], t0);
-  s1 += t0 - p[1] - p[2];
-
-  q2 = (s0 + s1) / b[0];
 
   td::renorm(q0, q1, q2);
   td_real result(q0, q1, q2);

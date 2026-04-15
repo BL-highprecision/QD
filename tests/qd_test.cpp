@@ -425,6 +425,67 @@ bool TestSuite<T>::test8() {
   return (delta < 4.0 * T::_eps);
 }
 
+bool test_qd_real_comparison() {
+  cout << endl;
+  cout << "Test 9.  (qd_real comparison normalization)." << endl;
+
+  qd_real a(1.0, 0.5, 0.0, 0.0);
+  qd_real b(1.5);
+  qd_real diff = a - b;
+  diff.renorm();
+
+  bool pass = diff.is_zero();
+  pass &= (a == b);
+  pass &= !(a != b);
+  pass &= !(a < b);
+  pass &= !(a > b);
+  pass &= (a <= b);
+  pass &= (a >= b);
+
+  pass &= (a == 1.5);
+  pass &= (1.5 == a);
+  pass &= (a == dd_real(1.5));
+  pass &= (dd_real(1.5) == a);
+
+  if (flag_verbose) {
+    cout << "a = [" << a[0] << ", " << a[1] << ", "
+         << a[2] << ", " << a[3] << "]" << endl;
+    cout << "b = " << b << endl;
+    cout << "renormalized diff is zero: " << diff.is_zero() << endl;
+  }
+
+  return pass;
+}
+
+bool test_dd_real_comparison() {
+  cout << endl;
+  cout << "Test 9.  (dd_real comparison normalization)." << endl;
+
+  double lo = std::ldexp(1.0, -53);
+  dd_real a(1.0 - lo, lo);
+  dd_real b(1.0);
+  dd_real diff = a - b;
+
+  bool pass = diff.is_zero();
+  pass &= (a == b);
+  pass &= !(a != b);
+  pass &= !(a < b);
+  pass &= !(a > b);
+  pass &= (a <= b);
+  pass &= (a >= b);
+
+  pass &= (a == 1.0);
+  pass &= (1.0 == a);
+
+  if (flag_verbose) {
+    cout << "a = [" << a._hi() << ", " << a._lo() << "]" << endl;
+    cout << "b = " << b << endl;
+    cout << "diff is zero: " << diff.is_zero() << endl;
+  }
+
+  return pass;
+}
+
 template <class T>
 bool TestSuite<T>::testall() {
   bool pass = true;
@@ -494,6 +555,7 @@ int main(int argc, char *argv[]) {
     if (flag_verbose)
       cout << "sizeof(dd_real) = " << sizeof(dd_real) << endl;
     pass &= dd_test.testall();
+    pass &= print_result(test_dd_real_comparison());
   }
 
   if (flag_test_qd) {
@@ -504,9 +566,9 @@ int main(int argc, char *argv[]) {
     if (flag_verbose)
       cout << "sizeof(qd_real) = " << sizeof(qd_real) << endl;
     pass &= qd_test.testall();
+    pass &= print_result(test_qd_real_comparison());
   }
   
   fpu_fix_end(&old_cw);
   return (pass ? 0 : 1);
 }
-

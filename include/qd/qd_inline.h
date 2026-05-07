@@ -545,7 +545,7 @@ inline qd_real operator*(const qd_real &a, const dd_real &b) {
   s2 = t0 + t1 + p4;
   p2 = s0;
 
-  p3 = a[2] * b._hi() + a[3] * b._lo() + q3 + q4;
+  p3 = a[2] * b._lo() + a[3] * b._hi() + q3 + q4;
   qd::three_sum2(p3, q0, s1);
   p4 = q0 + s2;
 

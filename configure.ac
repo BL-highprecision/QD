@@ -1,14 +1,14 @@
 #                                               -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
-define([QD_PATCH_VERSION], 24)
+define([QD_PATCH_VERSION], 0)
 AC_PREREQ([2.69])
-AC_INIT([qd],[2.3.QD_PATCH_VERSION],[dhbailey@lbl.gov])
+AC_INIT([qd3],[1.0.QD_PATCH_VERSION],[maho.nakata@gmail.com])
 AC_CONFIG_SRCDIR([src/qd_real.cpp])
 AC_CONFIG_MACRO_DIR([m4])
 
-PACKAGE="qd"
-MAJOR_VERSION="2"
-MINOR_VERSION="3"
+PACKAGE="qd3"
+MAJOR_VERSION="1"
+MINOR_VERSION="0"
 PATCH_VERSION="QD_PATCH_VERSION"
 VERSION=$MAJOR_VERSION.$MINOR_VERSION.$PATCH_VERSION
 AC_DEFINE_UNQUOTED([MAJOR_VERSION],$MAJOR_VERSION,[qd major version number])

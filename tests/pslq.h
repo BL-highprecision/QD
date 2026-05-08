@@ -22,6 +22,7 @@
 #include <cstdio>
 
 #include <qd/dd_real.h>
+#include <qd/td_real.h>
 #include <qd/qd_real.h>
 #include <qd/inline.h>
 
@@ -243,4 +244,3 @@ int pslq(const T *x, int n, T *r, double eps, int max_itr) {
 
   return err;
 }
-

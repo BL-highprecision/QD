@@ -573,14 +573,12 @@ string qd_real::to_string(int precision, int width, ios_base::fmtflags fmt,
     	// if this ratio is large, then we've got problems
     	if( fabs( from_string / this->x[0] ) > 3.0 ){
 
-    		int point_position;
-
     		// loop on the string, find the point, move it up one
     		// don't act on the first character
-    		for(i=1; i < s.length(); i++){
-    			if(s[i] == '.'){
-    				s[i] = s[i-1] ;
-    				s[i-1] = '.' ;
+    		for(std::string::size_type j = 1; j < s.length(); j++){
+    			if(s[j] == '.'){
+    				s[j] = s[j-1] ;
+    				s[j-1] = '.' ;
     				break;
     			}
     		}

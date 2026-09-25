@@ -1,9 +1,9 @@
 LDADD = $(top_builddir)/src/libqd.la
 AM_CPPFLAGS = -I$(top_builddir) -I$(top_builddir)/include -I$(top_srcdir)/include
 
-TESTS = qd_test pslq_test c_test
-check_PROGRAMS = qd_test pslq_test c_test
-EXTRA_PROGRAMS = qd_timer quadt_test huge
+TESTS = qd_test pslq_test c_test huge
+check_PROGRAMS = qd_test pslq_test c_test huge
+EXTRA_PROGRAMS = qd_timer quadt_test
 
 dist_noinst_DATA = coeff.dat
 

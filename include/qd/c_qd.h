@@ -24,45 +24,58 @@ extern "C" {
 void c_qd_add(const double *a, const double *b, double *c);
 void c_qd_add_dd_qd(const double *a, const double *b, double *c);
 void c_qd_add_qd_dd(const double *a, const double *b, double *c);
+void c_qd_add_td_qd(const double *a, const double *b, double *c);
+void c_qd_add_qd_td(const double *a, const double *b, double *c);
 void c_qd_add_d_qd(double a, const double *b, double *c);
 void c_qd_add_qd_d(const double *a, double b, double *c);
 void c_qd_selfadd(const double *a, double *b);
 void c_qd_selfadd_dd(const double *a, double *b);
+void c_qd_selfadd_td(const double *a, double *b);
 void c_qd_selfadd_d(double a, double *b);
 
 /* sub */
 void c_qd_sub(const double *a, const double *b, double *c);
 void c_qd_sub_dd_qd(const double *a, const double *b, double *c);
 void c_qd_sub_qd_dd(const double *a, const double *b, double *c);
+void c_qd_sub_td_qd(const double *a, const double *b, double *c);
+void c_qd_sub_qd_td(const double *a, const double *b, double *c);
 void c_qd_sub_d_qd(double a, const double *b, double *c);
 void c_qd_sub_qd_d(const double *a, double b, double *c);
 void c_qd_selfsub(const double *a, double *b);
 void c_qd_selfsub_dd(const double *a, double *b);
+void c_qd_selfsub_td(const double *a, double *b);
 void c_qd_selfsub_d(double a, double *b);
 
 /* mul */
 void c_qd_mul(const double *a, const double *b, double *c);
 void c_qd_mul_dd_qd(const double *a, const double *b, double *c);
 void c_qd_mul_qd_dd(const double *a, const double *b, double *c);
+void c_qd_mul_td_qd(const double *a, const double *b, double *c);
+void c_qd_mul_qd_td(const double *a, const double *b, double *c);
 void c_qd_mul_d_qd(double a, const double *b, double *c);
 void c_qd_mul_qd_d(const double *a, double b, double *c);
 void c_qd_selfmul(const double *a, double *b);
 void c_qd_selfmul_dd(const double *a, double *b);
+void c_qd_selfmul_td(const double *a, double *b);
 void c_qd_selfmul_d(double a, double *b);
 
 /* div */
 void c_qd_div(const double *a, const double *b, double *c);
 void c_qd_div_dd_qd(const double *a, const double *b, double *c);
 void c_qd_div_qd_dd(const double *a, const double *b, double *c);
+void c_qd_div_td_qd(const double *a, const double *b, double *c);
+void c_qd_div_qd_td(const double *a, const double *b, double *c);
 void c_qd_div_d_qd(double a, const double *b, double *c);
 void c_qd_div_qd_d(const double *a, double b, double *c);
 void c_qd_selfdiv(const double *a, double *b);
 void c_qd_selfdiv_dd(const double *a, double *b);
+void c_qd_selfdiv_td(const double *a, double *b);
 void c_qd_selfdiv_d(double a, double *b);
 
 /* copy */
 void c_qd_copy(const double *a, double *b);
 void c_qd_copy_dd(const double *a, double *b);
+void c_qd_copy_td(const double *a, double *b);
 void c_qd_copy_d(double a, double *b);
 
 int c_qd_sqrt(const double *a, double *b);
@@ -110,6 +123,8 @@ void c_qd_rand(double *a);
 void c_qd_comp(const double *a, const double *b, int *result);
 void c_qd_comp_qd_d(const double *a, double b, int *result);
 void c_qd_comp_d_qd(double a, const double *b, int *result);
+void c_qd_comp_qd_td(const double *a, const double *b, int *result);
+void c_qd_comp_td_qd(const double *a, const double *b, int *result);
 void c_qd_pi(double *a);
 void c_qd_2pi(double *a);
 double c_qd_epsilon(void);

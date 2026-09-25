@@ -30,6 +30,7 @@ using std::strcmp;
 int g_verbose = 0;
 bool flag_double_pslq = false;
 bool flag_dd_pslq = false;
+bool flag_td_pslq = false;
 bool flag_qd_pslq = false;
 
 /* Computes the value of the given n-th degree polynomial at point x
@@ -133,7 +134,7 @@ bool pslq_test(int p, int q) {
 }
 
 void print_usage() {
-  cout << "pslq_test [-h] [-n N] [-d] [-dd] [-qd] [-all] [-verbose]" << endl;
+  cout << "pslq_test [-h] [-n N] [-d] [-dd] [-td] [-qd] [-all] [-verbose]" << endl;
   cout << "  Performs the PSLQ algorithm on 1, r, r^2, ..., r^{n-1}" << endl;
   cout << "  where r is a root of a constructed integer coefficient" << endl;
   cout << "  polynomial.  PSLQ algorithm should reconstruct the polynomial" << endl;
@@ -144,11 +145,14 @@ void print_usage() {
   cout << "  -d        Perform PSLQ with double precision (53 bit mantissa)." << endl;
   cout << "  -dd       Perform PSLQ with double-double precision." << endl;
   cout << "            (about 106 bits of significand)." << endl;
+  cout << "  -td       Perform PSLQ with triple-double precision." << endl;
+  cout << "            (about 159 bits of significand)." << endl;
   cout << "  -qd       Perform PSLQ with quad-double precision." << endl;
-  cout << "            (about 212 bits of significand).  This is the default." << endl;
-  cout << "  -all      Perform PSLQ with all three precisions above." << endl;
+  cout << "            (about 212 bits of significand)." << endl;
+  cout << "  -all      Perform PSLQ with all four precisions above." << endl;
   cout << "  -verbose" << endl;
   cout << "  -v        Increase verbosity." << endl;
+  cout << "            Default run executes dd, td, and qd precisions." << endl;
 }
 
 int main(int argc, char **argv) {
@@ -164,10 +168,12 @@ int main(int argc, char **argv) {
       flag_double_pslq = true;
     } else if (strcmp(arg, "-dd") == 0) {
       flag_dd_pslq = true;
+    } else if (strcmp(arg, "-td") == 0) {
+      flag_td_pslq = true;
     } else if (strcmp(arg, "-qd") == 0) {
       flag_qd_pslq = true;
     } else if (strcmp(arg, "-all") == 0) {
-      flag_double_pslq = flag_dd_pslq = flag_qd_pslq = true;
+      flag_double_pslq = flag_dd_pslq = flag_td_pslq = flag_qd_pslq = true;
     } else if (strcmp(arg, "-v") == 0 || strcmp(arg, "-verbose") == 0) {
       g_verbose++;
     } else {
@@ -175,8 +181,9 @@ int main(int argc, char **argv) {
     }
   }
 
-  if (!flag_double_pslq && !flag_dd_pslq && !flag_qd_pslq) {
+  if (!flag_double_pslq && !flag_dd_pslq && !flag_td_pslq && !flag_qd_pslq) {
     flag_dd_pslq = true;
+    flag_td_pslq = true;
     flag_qd_pslq = true;
   }
 
@@ -199,6 +206,16 @@ int main(int argc, char **argv) {
     pass &= pslq_test<dd_real>(2, 5);
   }
 
+  if (flag_td_pslq) {
+    cout << "Performing triple-double precision PSLQ." << endl;
+    pass &= pslq_test<td_real>(2, 2);
+    pass &= pslq_test<td_real>(2, 3);
+    pass &= pslq_test<td_real>(2, 4);
+    pass &= pslq_test<td_real>(3, 3);
+    pass &= pslq_test<td_real>(2, 5);
+    pass &= pslq_test<td_real>(4, 3);
+  }
+
   if (flag_qd_pslq) {
     cout << "Performing quad-double precision PSLQ." << endl;
     pass &= pslq_test<qd_real>(3, 3);
@@ -217,5 +234,3 @@ int main(int argc, char **argv) {
   fpu_fix_end(&old_cw);
   return (pass ? 0 : 1);
 }
-
-

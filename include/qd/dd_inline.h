@@ -436,99 +436,166 @@ inline dd_real &dd_real::operator=(double a) {
 }
 
 /*********** Equality Comparisons ************/
+namespace qd {
+template <class A, class B>
+inline dd_real dd_comparison_difference(const A &a, const B &b) {
+  return dd_real(a) - dd_real(b);
+}
+
+template <class A, class B>
+inline bool dd_comparison_eq(const A &a, const B &b) {
+  dd_real da(a);
+  dd_real db(b);
+  if (da.isnan() || db.isnan())
+    return false;
+  if (da.isinf() || db.isinf())
+    return da.x[0] == db.x[0];
+  dd_real d = dd_comparison_difference(da, db);
+  return d.is_zero();
+}
+
+template <class A, class B>
+inline bool dd_comparison_lt(const A &a, const B &b) {
+  dd_real da(a);
+  dd_real db(b);
+  if (da.isnan() || db.isnan())
+    return false;
+  if (da.isinf() || db.isinf())
+    return da.x[0] < db.x[0];
+  dd_real d = dd_comparison_difference(da, db);
+  return d.is_negative();
+}
+
+template <class A, class B>
+inline bool dd_comparison_gt(const A &a, const B &b) {
+  dd_real da(a);
+  dd_real db(b);
+  if (da.isnan() || db.isnan())
+    return false;
+  if (da.isinf() || db.isinf())
+    return da.x[0] > db.x[0];
+  dd_real d = dd_comparison_difference(da, db);
+  return d.is_positive();
+}
+
+template <class A, class B>
+inline bool dd_comparison_le(const A &a, const B &b) {
+  dd_real da(a);
+  dd_real db(b);
+  if (da.isnan() || db.isnan())
+    return false;
+  if (da.isinf() || db.isinf())
+    return da.x[0] <= db.x[0];
+  dd_real d = dd_comparison_difference(da, db);
+  return d.is_zero() || d.is_negative();
+}
+
+template <class A, class B>
+inline bool dd_comparison_ge(const A &a, const B &b) {
+  dd_real da(a);
+  dd_real db(b);
+  if (da.isnan() || db.isnan())
+    return false;
+  if (da.isinf() || db.isinf())
+    return da.x[0] >= db.x[0];
+  dd_real d = dd_comparison_difference(da, db);
+  return d.is_zero() || d.is_positive();
+}
+}
+
 /* double-double == double */
 inline bool operator==(const dd_real &a, double b) {
-  return (a.x[0] == b && a.x[1] == 0.0);
+  return qd::dd_comparison_eq(a, b);
 }
 
 /* double-double == double-double */
 inline bool operator==(const dd_real &a, const dd_real &b) {
-  return (a.x[0] == b.x[0] && a.x[1] == b.x[1]);
+  return qd::dd_comparison_eq(a, b);
 }
 
 /* double == double-double */
 inline bool operator==(double a, const dd_real &b) {
-  return (a == b.x[0] && b.x[1] == 0.0);
+  return qd::dd_comparison_eq(a, b);
 }
 
 /*********** Greater-Than Comparisons ************/
 /* double-double > double */
 inline bool operator>(const dd_real &a, double b) {
-  return (a.x[0] > b || (a.x[0] == b && a.x[1] > 0.0));
+  return qd::dd_comparison_gt(a, b);
 }
 
 /* double-double > double-double */
 inline bool operator>(const dd_real &a, const dd_real &b) {
-  return (a.x[0] > b.x[0] || (a.x[0] == b.x[0] && a.x[1] > b.x[1]));
+  return qd::dd_comparison_gt(a, b);
 }
 
 /* double > double-double */
 inline bool operator>(double a, const dd_real &b) {
-  return (a > b.x[0] || (a == b.x[0] && b.x[1] < 0.0));
+  return qd::dd_comparison_gt(a, b);
 }
 
 /*********** Less-Than Comparisons ************/
 /* double-double < double */
 inline bool operator<(const dd_real &a, double b) {
-  return (a.x[0] < b || (a.x[0] == b && a.x[1] < 0.0));
+  return qd::dd_comparison_lt(a, b);
 }
 
 /* double-double < double-double */
 inline bool operator<(const dd_real &a, const dd_real &b) {
-  return (a.x[0] < b.x[0] || (a.x[0] == b.x[0] && a.x[1] < b.x[1]));
+  return qd::dd_comparison_lt(a, b);
 }
 
 /* double < double-double */
 inline bool operator<(double a, const dd_real &b) {
-  return (a < b.x[0] || (a == b.x[0] && b.x[1] > 0.0));
+  return qd::dd_comparison_lt(a, b);
 }
 
 /*********** Greater-Than-Or-Equal-To Comparisons ************/
 /* double-double >= double */
 inline bool operator>=(const dd_real &a, double b) {
-  return (a.x[0] > b || (a.x[0] == b && a.x[1] >= 0.0));
+  return qd::dd_comparison_ge(a, b);
 }
 
 /* double-double >= double-double */
 inline bool operator>=(const dd_real &a, const dd_real &b) {
-  return (a.x[0] > b.x[0] || (a.x[0] == b.x[0] && a.x[1] >= b.x[1]));
+  return qd::dd_comparison_ge(a, b);
 }
 
 /* double >= double-double */
 inline bool operator>=(double a, const dd_real &b) {
-  return (b <= a);
+  return qd::dd_comparison_ge(a, b);
 }
 
 /*********** Less-Than-Or-Equal-To Comparisons ************/
 /* double-double <= double */
 inline bool operator<=(const dd_real &a, double b) {
-  return (a.x[0] < b || (a.x[0] == b && a.x[1] <= 0.0));
+  return qd::dd_comparison_le(a, b);
 }
 
 /* double-double <= double-double */
 inline bool operator<=(const dd_real &a, const dd_real &b) {
-  return (a.x[0] < b.x[0] || (a.x[0] == b.x[0] && a.x[1] <= b.x[1]));
+  return qd::dd_comparison_le(a, b);
 }
 
 /* double <= double-double */
 inline bool operator<=(double a, const dd_real &b) {
-  return (b >= a);
+  return qd::dd_comparison_le(a, b);
 }
 
 /*********** Not-Equal-To Comparisons ************/
 /* double-double != double */
 inline bool operator!=(const dd_real &a, double b) {
-  return (a.x[0] != b || a.x[1] != 0.0);
+  return !(a == b);
 }
 
 /* double-double != double-double */
 inline bool operator!=(const dd_real &a, const dd_real &b) {
-  return (a.x[0] != b.x[0] || a.x[1] != b.x[1]);
+  return !(a == b);
 }
 
 /* double != double-double */
 inline bool operator!=(double a, const dd_real &b) {
-  return (a != b.x[0] || b.x[1] != 0.0);
+  return !(a == b);
 }
 
 /*********** Micellaneous ************/

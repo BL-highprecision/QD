@@ -819,132 +819,179 @@ inline qd_real &qd_real::operator=(const dd_real &a) {
 }
 
 /********** Equality Comparison **********/
+namespace qd {
+template <class A, class B>
+inline qd_real comparison_difference(const A &a, const B &b) {
+  qd_real d = qd_real(a) - qd_real(b);
+  d.renorm();
+  return d;
+}
+
+template <class A, class B>
+inline bool comparison_eq(const A &a, const B &b) {
+  qd_real qa(a);
+  qd_real qb(b);
+  if (qa.isnan() || qb.isnan())
+    return false;
+  if (qa.isinf() || qb.isinf())
+    return qa[0] == qb[0];
+  qd_real d = comparison_difference(qa, qb);
+  return d.is_zero();
+}
+
+template <class A, class B>
+inline bool comparison_lt(const A &a, const B &b) {
+  qd_real qa(a);
+  qd_real qb(b);
+  if (qa.isnan() || qb.isnan())
+    return false;
+  if (qa.isinf() || qb.isinf())
+    return qa[0] < qb[0];
+  qd_real d = comparison_difference(qa, qb);
+  return d.is_negative();
+}
+
+template <class A, class B>
+inline bool comparison_gt(const A &a, const B &b) {
+  qd_real qa(a);
+  qd_real qb(b);
+  if (qa.isnan() || qb.isnan())
+    return false;
+  if (qa.isinf() || qb.isinf())
+    return qa[0] > qb[0];
+  qd_real d = comparison_difference(qa, qb);
+  return d.is_positive();
+}
+
+template <class A, class B>
+inline bool comparison_le(const A &a, const B &b) {
+  qd_real qa(a);
+  qd_real qb(b);
+  if (qa.isnan() || qb.isnan())
+    return false;
+  if (qa.isinf() || qb.isinf())
+    return qa[0] <= qb[0];
+  qd_real d = comparison_difference(qa, qb);
+  return d.is_zero() || d.is_negative();
+}
+
+template <class A, class B>
+inline bool comparison_ge(const A &a, const B &b) {
+  qd_real qa(a);
+  qd_real qb(b);
+  if (qa.isnan() || qb.isnan())
+    return false;
+  if (qa.isinf() || qb.isinf())
+    return qa[0] >= qb[0];
+  qd_real d = comparison_difference(qa, qb);
+  return d.is_zero() || d.is_positive();
+}
+}
+
 inline bool operator==(const qd_real &a, double b) {
-  return (a[0] == b && a[1] == 0.0 && a[2] == 0.0 && a[3] == 0.0);
+  return qd::comparison_eq(a, b);
 }
 
 inline bool operator==(double a, const qd_real &b) {
-  return (b == a);
+  return qd::comparison_eq(a, b);
 }
 
 inline bool operator==(const qd_real &a, const dd_real &b) {
-  return (a[0] == b._hi() && a[1] == b._lo() && 
-          a[2] == 0.0 && a[3] == 0.0);
+  return qd::comparison_eq(a, b);
 }
 
 inline bool operator==(const dd_real &a, const qd_real &b) {
-  return (b == a);
+  return qd::comparison_eq(a, b);
 }
 
 inline bool operator==(const qd_real &a, const qd_real &b) {
-  return (a[0] == b[0] && a[1] == b[1] && 
-          a[2] == b[2] && a[3] == b[3]);
+  return qd::comparison_eq(a, b);
 }
 
 
 /********** Less-Than Comparison ***********/
 inline bool operator<(const qd_real &a, double b) {
-  return (a[0] < b || (a[0] == b && a[1] < 0.0));
+  return qd::comparison_lt(a, b);
 }
 
 inline bool operator<(double a, const qd_real &b) {
-  return (b > a);
+  return qd::comparison_lt(a, b);
 }
 
 inline bool operator<(const qd_real &a, const dd_real &b) {
-  return (a[0] < b._hi() || 
-          (a[0] == b._hi() && (a[1] < b._lo() ||
-                            (a[1] == b._lo() && a[2] < 0.0))));
+  return qd::comparison_lt(a, b);
 }
 
 inline bool operator<(const dd_real &a, const qd_real &b) {
-  return (b > a);
+  return qd::comparison_lt(a, b);
 }
 
 inline bool operator<(const qd_real &a, const qd_real &b) {
-  return (a[0] < b[0] ||
-          (a[0] == b[0] && (a[1] < b[1] ||
-                            (a[1] == b[1] && (a[2] < b[2] ||
-                                              (a[2] == b[2] && a[3] < b[3]))))));
+  return qd::comparison_lt(a, b);
 }
 
 /********** Greater-Than Comparison ***********/
 inline bool operator>(const qd_real &a, double b) {
-  return (a[0] > b || (a[0] == b && a[1] > 0.0));
+  return qd::comparison_gt(a, b);
 }
 
 inline bool operator>(double a, const qd_real &b) {
-  return (b < a);
+  return qd::comparison_gt(a, b);
 }
 
 inline bool operator>(const qd_real &a, const dd_real &b) {
-  return (a[0] > b._hi() || 
-          (a[0] == b._hi() && (a[1] > b._lo() ||
-                            (a[1] == b._lo() && a[2] > 0.0))));
+  return qd::comparison_gt(a, b);
 }
 
 inline bool operator>(const dd_real &a, const qd_real &b) {
-  return (b < a);
+  return qd::comparison_gt(a, b);
 }
 
 inline bool operator>(const qd_real &a, const qd_real &b) {
-  return (a[0] > b[0] ||
-          (a[0] == b[0] && (a[1] > b[1] ||
-                            (a[1] == b[1] && (a[2] > b[2] ||
-                                              (a[2] == b[2] && a[3] > b[3]))))));
+  return qd::comparison_gt(a, b);
 }
 
 
 /********** Less-Than-Or-Equal-To Comparison **********/
 inline bool operator<=(const qd_real &a, double b) {
-  return (a[0] < b || (a[0] == b && a[1] <= 0.0));
+  return qd::comparison_le(a, b);
 }
 
 inline bool operator<=(double a, const qd_real &b) {
-  return (b >= a);
+  return qd::comparison_le(a, b);
 }
 
 inline bool operator<=(const qd_real &a, const dd_real &b) {
-  return (a[0] < b._hi() || 
-          (a[0] == b._hi() && (a[1] < b._lo() || 
-                            (a[1] == b._lo() && a[2] <= 0.0))));
+  return qd::comparison_le(a, b);
 }
 
 inline bool operator<=(const dd_real &a, const qd_real &b) {
-  return (b >= a);
+  return qd::comparison_le(a, b);
 }
 
 inline bool operator<=(const qd_real &a, const qd_real &b) {
-  return (a[0] < b[0] || 
-          (a[0] == b[0] && (a[1] < b[1] ||
-                            (a[1] == b[1] && (a[2] < b[2] ||
-                                              (a[2] == b[2] && a[3] <= b[3]))))));
+  return qd::comparison_le(a, b);
 }
 
 /********** Greater-Than-Or-Equal-To Comparison **********/
 inline bool operator>=(const qd_real &a, double b) {
-  return (a[0] > b || (a[0] == b && a[1] >= 0.0));
+  return qd::comparison_ge(a, b);
 }
 
 inline bool operator>=(double a, const qd_real &b) {
-  return (b <= a);
+  return qd::comparison_ge(a, b);
 }
 
 inline bool operator>=(const qd_real &a, const dd_real &b) {
-  return (a[0] > b._hi() || 
-          (a[0] == b._hi() && (a[1] > b._lo() || 
-                            (a[1] == b._lo() && a[2] >= 0.0))));
+  return qd::comparison_ge(a, b);
 }
 
 inline bool operator>=(const dd_real &a, const qd_real &b) {
-  return (b <= a);
+  return qd::comparison_ge(a, b);
 }
 
 inline bool operator>=(const qd_real &a, const qd_real &b) {
-  return (a[0] > b[0] || 
-          (a[0] == b[0] && (a[1] > b[1] ||
-                            (a[1] == b[1] && (a[2] > b[2] ||
-                                              (a[2] == b[2] && a[3] >= b[3]))))));
+  return qd::comparison_ge(a, b);
 }
 
 

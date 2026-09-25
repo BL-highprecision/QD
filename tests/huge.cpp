@@ -19,6 +19,7 @@
 #include <sstream>
 #include <limits>
 #include <qd/qd_real.h>
+#include <qd/td_real.h>
 
 using std::cout;
 using std::cerr;
@@ -37,6 +38,7 @@ using std::string;
 
 // Global flags passed to the main program.
 static bool flag_test_dd = false;
+static bool flag_test_td = false;
 static bool flag_test_qd = false;
 bool flag_verbose = false;
 
@@ -49,14 +51,14 @@ bool print_result(bool result) {
 }
 
 void print_usage() {
-  cout << "qd_test [-h] [-dd] [-qd] [-all]" << endl;
+  cout << "qd_test [-h] [-dd] [-td] [-qd] [-all]" << endl;
   cout << "  Tests output of large numbers." << endl;
   cout << endl;
   cout << "  -h -help  Prints this usage message." << endl;
   cout << "  -dd       Perform tests with double-double types." << endl;
+  cout << "  -td       Perform tests with triple-double types." << endl;
   cout << "  -qd       Perform tests with quad-double types." << endl;
-  cout << "            This is the default." << endl;
-  cout << "  -all      Perform both double-double and quad-double tests." << endl;
+  cout << "  -all      Perform double-double, triple-double, and quad-double tests." << endl;
   cout << "  -v" << endl;
   cout << "  -verbose  Print detailed information for each test." << endl;
 }
@@ -564,6 +566,36 @@ bool test_qd_regression() {
   return pass;
 }
 
+bool test_td_regression() {
+  bool pass = true;
+  const td_real maxv   = td_real::_max;
+  const td_real one_td = td_real(1.0);
+  const dd_real one_dd = dd_real(1.0);
+  const double  one_d  = 1.0;
+
+  const double td_eps     = std::numeric_limits<td_real>::epsilon();
+  const double td_tol_div = 64.0 * td_eps;
+
+  td_real q_td = maxv / one_td;
+  pass &= check_finite  ("td max / td one finite",     q_td);
+  pass &= check_rel_close("td max / td one value",     q_td, maxv, td_tol_div);
+  SKIP_RECONSTRUCTION("td max / td one reconstruction");
+
+  td_real q_dd = maxv / one_dd;
+  pass &= check_finite  ("td max / dd one finite",     q_dd);
+  pass &= check_rel_close("td max / dd one value",     q_dd, maxv, td_tol_div);
+  SKIP_RECONSTRUCTION("td max / dd one reconstruction");
+
+  td_real q_d = maxv / one_d;
+  pass &= check_finite  ("td max / double one finite", q_d);
+  pass &= check_rel_close("td max / double one value", q_d, maxv, td_tol_div);
+  SKIP_RECONSTRUCTION("td max / double one reconstruction");
+
+  pass &= test_large_regression<td_real>("td");
+
+  return pass;
+}
+
 int main(int argc, char *argv[]) {
   
   bool pass = true;
@@ -579,10 +611,12 @@ int main(int argc, char *argv[]) {
       exit(0);
     } else if (arg == "-dd") {
       flag_test_dd = true;
+    } else if (arg == "-td") {
+      flag_test_td = true;
     } else if (arg == "-qd") {
       flag_test_qd = true;
     } else if (arg == "-all") {
-      flag_test_dd = flag_test_qd = true;
+      flag_test_dd = flag_test_td = flag_test_qd = true;
     } else if (arg == "-v" || arg == "-verbose") {
       flag_verbose = true;
     } else {
@@ -591,8 +625,9 @@ int main(int argc, char *argv[]) {
   }
 
   /* If no flag, test both double-double and quad-double. */
-  if (!flag_test_dd && !flag_test_qd) {
+  if (!flag_test_dd && !flag_test_td && !flag_test_qd) {
     flag_test_dd = true;
+    flag_test_td = true;
     flag_test_qd = true;
   }
 
@@ -607,6 +642,18 @@ int main(int argc, char *argv[]) {
     dd_pass &= test_dd_regression();
     print_result(dd_pass);
     pass &= dd_pass;
+  }
+
+  if (flag_test_td) {
+    bool td_pass = true;
+    cout << endl;
+    cout << "Testing td_real ..." << endl;
+    td_pass &= test_huge<td_real>();
+    td_pass &= test_max<td_real>(
+        "1.7976931348623158079372897140530286112296785260e+308");
+    td_pass &= test_td_regression();
+    print_result(td_pass);
+    pass &= td_pass;
   }
 
   if (flag_test_qd) {

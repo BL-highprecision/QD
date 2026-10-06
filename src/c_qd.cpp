@@ -543,4 +543,125 @@ double c_qd_epsilon(void) {
     return (double) std::numeric_limits<qd_real>::epsilon();
 }
 
+void c_qd_pi2(double *a) {
+  TO_DOUBLE_PTR(qd_real::_pi2, a);
+}
+
+void c_qd_pi4(double *a) {
+  TO_DOUBLE_PTR(qd_real::_pi4, a);
+}
+
+void c_qd_3pi4(double *a) {
+  TO_DOUBLE_PTR(qd_real::_3pi4, a);
+}
+
+void c_qd_e(double *a) {
+  TO_DOUBLE_PTR(qd_real::_e, a);
+}
+
+void c_qd_ln2(double *a) {
+  TO_DOUBLE_PTR(qd_real::_log2, a);
+}
+
+void c_qd_ln10(double *a) {
+  TO_DOUBLE_PTR(qd_real::_log10, a);
+}
+
+void c_qd_nan(double *a) {
+  TO_DOUBLE_PTR(qd_real::_nan, a);
+}
+
+void c_qd_inf(double *a) {
+  TO_DOUBLE_PTR(qd_real::_inf, a);
+}
+
+void c_qd_pow(const double *a, const double *b, double *c) {
+  qd_real cc;
+  cc = pow(qd_real(a), qd_real(b));
+  TO_DOUBLE_PTR(cc, c);
+}
+
+void c_qd_log2(const double *a, double *b) {
+  qd_real bb;
+  bb = log(qd_real(a)) / qd_real::_log2;
+  TO_DOUBLE_PTR(bb, b);
+}
+
+void c_qd_fmod(const double *a, const double *b, double *c) {
+  qd_real cc;
+  cc = fmod(qd_real(a), qd_real(b));
+  TO_DOUBLE_PTR(cc, c);
+}
+
+void c_qd_inv(const double *a, double *b) {
+  qd_real bb;
+  bb = inv(qd_real(a));
+  TO_DOUBLE_PTR(bb, b);
+}
+
+int c_qd_isfinite(const double *a) {
+  return isfinite(qd_real(a));
+}
+
+int c_qd_isinf(const double *a) {
+  return isinf(qd_real(a));
+}
+
+int c_qd_isnan(const double *a) {
+  return isnan(qd_real(a));
+}
+
+void c_qd_fmax(const double *a, const double *b, double *c) {
+  qd_real aa(a), bb(b);
+  if (isnan(aa)) {
+    TO_DOUBLE_PTR(bb, c);
+  } else if (isnan(bb)) {
+    TO_DOUBLE_PTR(aa, c);
+  } else if (aa > bb) {
+    TO_DOUBLE_PTR(aa, c);
+  } else {
+    TO_DOUBLE_PTR(bb, c);
+  }
+}
+
+void c_qd_fmin(const double *a, const double *b, double *c) {
+  qd_real aa(a), bb(b);
+  if (isnan(aa)) {
+    TO_DOUBLE_PTR(bb, c);
+  } else if (isnan(bb)) {
+    TO_DOUBLE_PTR(aa, c);
+  } else if (aa < bb) {
+    TO_DOUBLE_PTR(aa, c);
+  } else {
+    TO_DOUBLE_PTR(bb, c);
+  }
+}
+
+void c_qd_max(const double *a, const double *b, double *c) {
+  qd_real aa(a), bb(b);
+  qd_real cc;
+  cc = (aa > bb) ? aa : bb;
+  TO_DOUBLE_PTR(cc, c);
+}
+
+void c_qd_min(const double *a, const double *b, double *c) {
+  qd_real aa(a), bb(b);
+  qd_real cc;
+  cc = (aa < bb) ? aa : bb;
+  TO_DOUBLE_PTR(cc, c);
+}
+
+void c_qd_divrem(const double *a, const double *b, double *q, double *r) {
+  qd_real rr;
+  qd_real qq = divrem(qd_real(a), qd_real(b), rr);
+  TO_DOUBLE_PTR(qq, q);
+  TO_DOUBLE_PTR(rr, r);
+}
+
+void c_qd_drem(const double *a, const double *b, double *c) {
+  qd_real cc;
+  cc = drem(qd_real(a), qd_real(b));
+  TO_DOUBLE_PTR(cc, c);
+}
+
 }

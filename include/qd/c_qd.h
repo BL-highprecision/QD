@@ -129,6 +129,32 @@ void c_qd_pi(double *a);
 void c_qd_2pi(double *a);
 double c_qd_epsilon(void);
 
+void c_qd_pi2(double *a);
+void c_qd_pi4(double *a);
+void c_qd_3pi4(double *a);
+void c_qd_e(double *a);
+void c_qd_ln2(double *a);
+void c_qd_ln10(double *a);
+void c_qd_nan(double *a);
+void c_qd_inf(double *a);
+
+void c_qd_pow(const double *a, const double *b, double *c);
+void c_qd_log2(const double *a, double *b);
+void c_qd_fmod(const double *a, const double *b, double *c);
+void c_qd_inv(const double *a, double *b);
+
+int c_qd_isfinite(const double *a);
+int c_qd_isinf(const double *a);
+int c_qd_isnan(const double *a);
+
+void c_qd_fmax(const double *a, const double *b, double *c);
+void c_qd_fmin(const double *a, const double *b, double *c);
+void c_qd_max(const double *a, const double *b, double *c);
+void c_qd_min(const double *a, const double *b, double *c);
+
+void c_qd_divrem(const double *a, const double *b, double *q, double *r);
+void c_qd_drem(const double *a, const double *b, double *c);
+
 #ifdef __cplusplus
 }
 #endif

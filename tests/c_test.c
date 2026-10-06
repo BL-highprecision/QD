@@ -158,7 +158,125 @@ int test_3() {
   return 0;
 }
 
+/* Returns nonzero if |a - b| > tol, where a is a quad-double. */
+static int qd_differs(const double *a, double b, double tol) {
+  double t[4], t2[4];
+  int r;
+  c_qd_sub_qd_d(a, b, t);
+  c_qd_abs(t, t2);
+  c_qd_comp_qd_d(t2, tol, &r);
+  return r > 0;
+}
+
+int test_4() {
+  double a[4], b[4], c[4], q[4], rem[4], pi[4], pi2[4], pi4[4], e[4], ln2[4];
+  double eps = c_qd_epsilon();
+  int r;
+
+  puts("Test 4.  (Extra C wrapper functions: constants, pow, fmod, ...)");
+
+  /* constants: check relations between them rather than digit strings */
+  c_qd_pi(pi);
+  c_qd_pi2(pi2);
+  c_qd_pi4(pi4);
+  c_qd_mul_qd_d(pi2, 2.0, c);
+  c_qd_comp(c, pi, &r);
+  if (r != 0) { puts("  c_qd_pi2 failed"); return 1; }
+  c_qd_mul_qd_d(pi4, 4.0, c);
+  c_qd_comp(c, pi, &r);
+  if (r != 0) { puts("  c_qd_pi4 failed"); return 1; }
+  c_qd_3pi4(c);
+  c_qd_mul_qd_d(pi4, 3.0, a);
+  c_qd_sub(c, a, b);
+  c_qd_abs(b, c);
+  c_qd_comp_qd_d(c, 4.0 * eps, &r);
+  if (r > 0) { puts("  c_qd_3pi4 failed"); return 1; }
+
+  c_qd_e(e);
+  c_qd_log(e, c);
+  if (qd_differs(c, 1.0, 4.0 * eps)) { puts("  c_qd_e failed"); return 1; }
+
+  c_qd_ln2(ln2);
+  c_qd_exp(ln2, c);
+  if (qd_differs(c, 2.0, 4.0 * eps)) { puts("  c_qd_ln2 failed"); return 1; }
+
+  c_qd_ln10(a);
+  c_qd_exp(a, c);
+  if (qd_differs(c, 10.0, 40.0 * eps)) { puts("  c_qd_ln10 failed"); return 1; }
+
+  c_qd_nan(a);
+  if (!c_qd_isnan(a) || c_qd_isfinite(a) || c_qd_isinf(a)) {
+    puts("  c_qd_nan / c_qd_isnan failed"); return 1;
+  }
+  c_qd_inf(a);
+  if (!c_qd_isinf(a) || c_qd_isfinite(a) || c_qd_isnan(a)) {
+    puts("  c_qd_inf / c_qd_isinf failed"); return 1;
+  }
+  c_qd_copy_d(1.5, a);
+  if (!c_qd_isfinite(a) || c_qd_isinf(a) || c_qd_isnan(a)) {
+    puts("  c_qd_isfinite failed"); return 1;
+  }
+
+  /* pow: 2^10 = 1024 */
+  c_qd_copy_d(2.0, a);
+  c_qd_copy_d(10.0, b);
+  c_qd_pow(a, b, c);
+  if (qd_differs(c, 1024.0, 1024.0 * 4.0 * eps)) { puts("  c_qd_pow failed"); return 1; }
+
+  /* log2(1024) = 10 */
+  c_qd_log2(c, a);
+  if (qd_differs(a, 10.0, 40.0 * eps)) { puts("  c_qd_log2 failed"); return 1; }
+
+  /* inv(4) = 0.25 */
+  c_qd_copy_d(4.0, a);
+  c_qd_inv(a, c);
+  c_qd_comp_qd_d(c, 0.25, &r);
+  if (r != 0) { puts("  c_qd_inv failed"); return 1; }
+
+  /* fmod(7.5, 2) = 1.5; drem(7.5, 2) = -0.5; divrem(7.5, 2) = (4, -0.5) */
+  c_qd_copy_d(7.5, a);
+  c_qd_copy_d(2.0, b);
+  c_qd_fmod(a, b, c);
+  c_qd_comp_qd_d(c, 1.5, &r);
+  if (r != 0) { puts("  c_qd_fmod failed"); return 1; }
+  c_qd_drem(a, b, c);
+  c_qd_comp_qd_d(c, -0.5, &r);
+  if (r != 0) { puts("  c_qd_drem failed"); return 1; }
+  c_qd_divrem(a, b, q, rem);
+  c_qd_comp_qd_d(q, 4.0, &r);
+  if (r != 0) { puts("  c_qd_divrem (quotient) failed"); return 1; }
+  c_qd_comp_qd_d(rem, -0.5, &r);
+  if (r != 0) { puts("  c_qd_divrem (remainder) failed"); return 1; }
+
+  /* max/min and fmax/fmin */
+  c_qd_copy_d(3.0, a);
+  c_qd_copy_d(-2.0, b);
+  c_qd_max(a, b, c);
+  c_qd_comp_qd_d(c, 3.0, &r);
+  if (r != 0) { puts("  c_qd_max failed"); return 1; }
+  c_qd_min(a, b, c);
+  c_qd_comp_qd_d(c, -2.0, &r);
+  if (r != 0) { puts("  c_qd_min failed"); return 1; }
+  c_qd_fmax(a, b, c);
+  c_qd_comp_qd_d(c, 3.0, &r);
+  if (r != 0) { puts("  c_qd_fmax failed"); return 1; }
+  c_qd_fmin(a, b, c);
+  c_qd_comp_qd_d(c, -2.0, &r);
+  if (r != 0) { puts("  c_qd_fmin failed"); return 1; }
+
+  /* fmax/fmin ignore a NaN argument */
+  c_qd_nan(b);
+  c_qd_fmax(a, b, c);
+  c_qd_comp_qd_d(c, 3.0, &r);
+  if (r != 0) { puts("  c_qd_fmax (nan) failed"); return 1; }
+  c_qd_fmin(b, a, c);
+  c_qd_comp_qd_d(c, 3.0, &r);
+  if (r != 0) { puts("  c_qd_fmin (nan) failed"); return 1; }
+
+  return 0;
+}
+
 int main(void) {
   fpu_fix_start(NULL);
-  return test_1() || test_2() || test_3();
+  return test_1() || test_2() || test_3() || test_4();
 }

@@ -56,6 +56,12 @@ inline bool qd_real_sqrt_needs_rescale(double a_hi) {
   return std::fabs(a_hi) > 0x1p+969;
 }
 
+/* Sqrt: scale tiny inputs up by 4^300 and the result back down by 2^300,
+   using sqrt(a) = 2^-300 * sqrt(4^300 a). */
+inline bool qd_real_sqrt_needs_upscale(double a_hi) {
+  return std::fabs(a_hi) < 0x1p-800;
+}
+
 qd_real fsqrt_core(const qd_real &a, int &flag) {
   int i;
   double e, eps;
@@ -825,6 +831,9 @@ QD_API qd_real fsqrt(const qd_real &a, int &flag) {
      inputs by using the exact identity sqrt(a) = 2 * sqrt(a / 4). */
   if (qd_real_sqrt_needs_rescale(a[0])) {
     return mul_pwr2(fsqrt_core(mul_pwr2(a, 0.25), flag), 2.0);
+  }
+  if (qd_real_sqrt_needs_upscale(a[0])) {
+    return mul_pwr2(fsqrt_core(mul_pwr2(a, 0x1p+600), flag), 0x1p-300);
   }
 
   return fsqrt_core(a, flag);

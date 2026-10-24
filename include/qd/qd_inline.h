@@ -304,8 +304,16 @@ inline qd_real qd_real::ieee_add(const qd_real &a, const qd_real &b) {
   while (k < 4) {
     if (i >= 4 && j >= 4) {
       x[k] = u;
-      if (k < 3)
+      if (k < 3) {
         x[++k] = v;
+      } else {
+        /* k == 3: v must not be dropped.  After cancellation the parts
+           emitted so far can overlap, so they hold fewer than 212 bits and
+           v can lie well above the last bit of the result.  Renormalize
+           five terms instead (all inputs are consumed, nothing is left). */
+        qd::renorm(x[0], x[1], x[2], x[3], v);
+        return qd_real(x[0], x[1], x[2], x[3]);
+      }
       break;
     }
 

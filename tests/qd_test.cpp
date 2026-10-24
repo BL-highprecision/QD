@@ -1024,6 +1024,48 @@ bool TestSuite<T>::testall() {
   return pass;
 }
 
+/* qd_real::ieee_add on near-cancelling sums.  When all eight input parts
+   are consumed with three output parts emitted, the remainder v of the
+   accumulator used to be dropped; after cancellation that lost up to about
+   86 units of 2^-209 relative (documented bound: about 0.5).  Expected
+   values are the exact sums rounded to four doubles (computed with mpmath). */
+bool test_qd_real_ieee_add_cancellation() {
+  cout << endl;
+  cout << "Test 10.  (qd_real::ieee_add with cancellation)." << endl;
+
+  static const char *cases[][3][4] = {
+    {{"0x1.951721a089dacp-16", "0x1.bfd25b612531bp-70", "0x1.8ccb5c92981cap-125", "0x1.fdb48ac690c3ep-180"},
+     {"-0x1.9516c2de75542p-16", "-0x1.ef9cf9d9adc96p-70", "0x1.7d7f1c298e636p-124", "0x1.fff9515590769p-184"},
+     {"0x1.7b08521a7d035p-34", "0x1.861ddda1643e5p-88", "-0x1.ac692c726f126p-143", "0x1.fdbe9cb490000p-200"}},
+    {{"0x1.b19c6d75a4d6ep+3", "-0x1.2b2893130a8b5p-51", "-0x1.d8f0b92099d05p-109", "0x1.3a15c7a42b826p-163"},
+     {"-0x1.b19d4f23da799p+3", "0x1.c5a00064e2d90p-51", "-0x1.f649c2d5adb67p-108", "0x1.fff4fc9a005ebp-165"},
+     {"-0x1.c35c6b455b2c4p-14", "-0x1.255c4f64a2e2cp-68", "-0x1.0fb2fd4f4a45fp-123", "0x1.836555cd06000p-178"}},
+    {{"0x1.8e8f019860773p+15", "0x1.c0b7495f54327p-40", "-0x1.ea4cb65a1dde9p-94", "0x1.3d1ab6bbfea7fp-148"},
+     {"-0x1.8e997f59382e5p+15", "0x1.f337fa392d224p-40", "0x1.81c33a8bef873p-96", "0x1.fffff555aa4e9p-150"},
+     {"-0x1.4fb81af6e3130p+2", "-0x1.0bc677eab5627p-52", "-0x1.be7b721fcbd0cp-106", "0x1.ab411693b9400p-160"}},
+    {{"0x1.8c13ebd58c314p+18", "-0x1.ffa669caed1c3p-38", "-0x1.b0a1f7341752ap-92", "0x1.bed49380a1951p-147"},
+     {"-0x1.8bfc27fb8259dp+18", "-0x1.01b0f65212978p-37", "0x1.a40bbd55040e7p-91", "-0x1.16e495cfa947ep-145"},
+     {"0x1.7c3da09d76bfdp+6", "-0x1.0acde24965344p-51", "-0x1.4f9141e6b8a73p-105", "0x1.1e20fe3ac8000p-162"}}
+  };
+
+  bool pass = true;
+  for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {
+    double p[3][4];
+    for (int i = 0; i < 3; i++)
+      for (int j = 0; j < 4; j++)
+        p[i][j] = std::strtod(cases[c][i][j], NULL);
+    qd_real a(p[0][0], p[0][1], p[0][2], p[0][3]);
+    qd_real b(p[1][0], p[1][1], p[1][2], p[1][3]);
+    qd_real expected(p[2][0], p[2][1], p[2][2], p[2][3]);
+    qd_real r = qd_real::ieee_add(a, b);
+    double err = to_double(abs(r - expected) / abs(expected)) / qd_real::_eps;
+    if (flag_verbose)
+      cout << "  case " << c << ": error " << err << " eps" << endl;
+    pass &= (err < 4.0);
+  }
+  return pass;
+}
+
 void print_usage() {
   cout << "qd_test [-h] [-dd] [-td] [-qd] [-all]" << endl;
   cout << "  Performs miscellaneous tests of the quad-double library," << endl;
@@ -1094,6 +1136,7 @@ int main(int argc, char *argv[]) {
       cout << "sizeof(qd_real) = " << sizeof(qd_real) << endl;
     pass &= qd_test.testall();
     pass &= print_result(test_qd_real_comparison());
+    pass &= print_result(test_qd_real_ieee_add_cancellation());
   }
 
   if (flag_test_td) {

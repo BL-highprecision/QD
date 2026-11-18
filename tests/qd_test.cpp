@@ -1096,6 +1096,40 @@ bool test_qd_real_sqrt_tiny() {
   return pass;
 }
 
+/* qd_real::ieee_add on two same-sign sums an ulp apart.  The first ends
+   with three parts emitted, the second with four emitted before all inputs
+   are read.  Expected values are the exact sums rounded to four doubles. */
+bool test_qd_real_ieee_add_four_parts() {
+  cout << endl;
+  cout << "Test 12.  (qd_real::ieee_add with four parts emitted)." << endl;
+
+  static const char *cases[][3][4] = {
+    {{"-0x1.10b3152f6f89ap+0", "-0x1.fffffffffffffp-56", "0x1.dbf40e3873925p-110", "0x1.bd32b707ee75cp-166"},
+     {"-0x1.061d2017c3fddp+0", "0x1.f2c626c6a92efp-54", "0x1.db856994e5f1ep-110", "0x1.8fb8e95ff5794p-164"},
+     {"-0x1.0b681aa399c3bp+1", "-0x1.469cec9cab688p-53", "-0x1.0910d10654cf8p-107", "0x1.bfe0b2e43e22dp-161"}},
+    {{"-0x1.10b3152f6f89ap+0", "-0x1.fffffffffffffp-56", "0x1.dbf40e3873925p-110", "0x1.bd32b707ee75dp-166"},
+     {"-0x1.061d2017c3fddp+0", "0x1.f2c626c6a92efp-54", "0x1.db856994e5f1ep-110", "0x1.8fb8e95ff5794p-164"},
+     {"-0x1.0b681aa399c3bp+1", "-0x1.469cec9cab688p-53", "-0x1.0910d10654cf8p-107", "0x1.bfe0b2e43e22dp-161"}}
+  };
+
+  bool pass = true;
+  for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); c++) {
+    double p[3][4];
+    for (int i = 0; i < 3; i++)
+      for (int j = 0; j < 4; j++)
+        p[i][j] = std::strtod(cases[c][i][j], NULL);
+    qd_real a(p[0][0], p[0][1], p[0][2], p[0][3]);
+    qd_real b(p[1][0], p[1][1], p[1][2], p[1][3]);
+    qd_real expected(p[2][0], p[2][1], p[2][2], p[2][3]);
+    qd_real r = qd_real::ieee_add(a, b);
+    double err = to_double(abs(r - expected) / abs(expected)) / qd_real::_eps;
+    if (flag_verbose)
+      cout << "  case " << c << ": error " << err << " eps" << endl;
+    pass &= (err < 4.0);
+  }
+  return pass;
+}
+
 void print_usage() {
   cout << "qd_test [-h] [-dd] [-td] [-qd] [-all]" << endl;
   cout << "  Performs miscellaneous tests of the quad-double library," << endl;
@@ -1168,6 +1202,7 @@ int main(int argc, char *argv[]) {
     pass &= print_result(test_qd_real_comparison());
     pass &= print_result(test_qd_real_ieee_add_cancellation());
     pass &= print_result(test_qd_real_sqrt_tiny());
+    pass &= print_result(test_qd_real_ieee_add_four_parts());
   }
 
   if (flag_test_td) {

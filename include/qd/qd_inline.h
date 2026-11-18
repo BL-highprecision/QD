@@ -333,12 +333,21 @@ inline qd_real qd_real::ieee_add(const qd_real &a, const qd_real &b) {
     }
   }
 
-  /* add the rest. */
-  for (k = i; k < 4; k++)
-    x[3] += a[k];
-  for (k = j; k < 4; k++)
-    x[3] += b[k];
+  if (k == 4) {
+    /* Inputs remain after four parts.  The parts can overlap, so u may
+       lie above the result's last bit.  Sum u, v and the unread parts
+       into a fifth term and renormalize the five. */
+    double e = v;
+    for (k = i; k < 4; k++)
+      e += a[k];
+    for (k = j; k < 4; k++)
+      e += b[k];
+    e = u + e;
+    qd::renorm(x[0], x[1], x[2], x[3], e);
+    return qd_real(x[0], x[1], x[2], x[3]);
+  }
 
+  /* all inputs read. */
   qd::renorm(x[0], x[1], x[2], x[3]);
   return qd_real(x[0], x[1], x[2], x[3]);
 }
